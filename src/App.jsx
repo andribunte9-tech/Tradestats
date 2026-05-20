@@ -11,6 +11,7 @@ import AnalysePage from './components/AnalysePage'
 import SetupLibraryPage from './components/SetupLibraryPage'
 import ProfileTab, { ReadonlyShareView } from './components/ProfileTab'
 import { ImportToast } from './components/LiveSyncPanel'
+import { SetupGate } from './components/SetupWizard'
 import { TradesProvider } from './hooks/useTrades'
 import { LiveSyncProvider } from './hooks/useLiveSync'
 import { PrivacyModeProvider } from './hooks/usePrivacyMode'
@@ -63,23 +64,25 @@ export default function App() {
 
   return (
     <LanguageProvider>
-      <TradesProvider>
-        <LiveSyncProvider>
-          <PrivacyModeProvider>
-            <ToastProvider>
-              <PositionNotesProvider>
-                <SetupsProvider>
-                  <Layout activePage={activePage} setActivePage={setActivePage}>
-                    {pages[activePage] || <Dashboard />}
-                  </Layout>
-                  {/* Auto-import toast notification */}
-                  <ImportToast />
-                </SetupsProvider>
-              </PositionNotesProvider>
-            </ToastProvider>
-          </PrivacyModeProvider>
-        </LiveSyncProvider>
-      </TradesProvider>
+      <SetupGate>
+        <TradesProvider>
+          <LiveSyncProvider>
+            <PrivacyModeProvider>
+              <ToastProvider>
+                <PositionNotesProvider>
+                  <SetupsProvider>
+                    <Layout activePage={activePage} setActivePage={setActivePage}>
+                      {pages[activePage] || <Dashboard />}
+                    </Layout>
+                    {/* Auto-import toast notification */}
+                    <ImportToast />
+                  </SetupsProvider>
+                </PositionNotesProvider>
+              </ToastProvider>
+            </PrivacyModeProvider>
+          </LiveSyncProvider>
+        </TradesProvider>
+      </SetupGate>
     </LanguageProvider>
   )
 }

@@ -14,8 +14,12 @@ a = Analysis(
     pathex=['.'],
     binaries=[],
     datas=[
-        # Vite-Build (muss vorher nach src/backend/dist/ kopiert werden)
-        ('dist', 'dist'),
+        # Ab v1.1.0: dist/ wird NICHT mehr gebundelt. Das Frontend kommt aus
+        # der Cloud (https://tradestats-st.vercel.app). Falls du das Backend
+        # mit lokalem Frontend testen willst, ent-kommentiere die Zeile unten
+        # und sorge dafür, dass src/backend/dist/ via npm run build + copy
+        # existiert (siehe build_exe.bat Schritt 2).
+        # ('dist', 'dist'),
     ],
     hiddenimports=[
         # uvicorn braucht diese – werden nicht automatisch erkannt

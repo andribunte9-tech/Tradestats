@@ -53,6 +53,16 @@ DIST_PATH      = _get_dist_path()
 FRONTEND_PORT  = 8080
 IS_BUNDLED     = hasattr(sys, '_MEIPASS')
 
+# Cloud-Frontend-URL — wird beim App-Start im Browser geöffnet.
+# Override per Environment-Variable TRADESTATS_FRONTEND_URL möglich,
+# z.B. für lokales Testen gegen einen Vite-Dev-Server.
+FRONTEND_URL = os.environ.get(
+    'TRADESTATS_FRONTEND_URL',
+    'https://tradestats-st.vercel.app'
+)
+# Lokaler dist/-Server nur noch als Legacy-Fallback (wird nicht mehr gebundled).
+HAS_LOCAL_FRONTEND = os.path.isdir(DIST_PATH)
+
 # ── Log-Datei: %APPDATA%\TradeStats\app.log ───────────────────────────────
 # Muss VOR basicConfig eingerichtet werden.
 # WICHTIG: sys.stdout ist im PyInstaller-noconsole-Modus None →
@@ -556,9 +566,14 @@ def _start_frontend_server():
 
 
 def _open_browser():
-    """Öffnet den Browser 3 Sekunden nach dem Start (nur im Bundle)."""
+    """Öffnet den Browser 3 Sekunden nach dem Start (nur im Bundle).
+    Standardmäßig die Cloud-Vercel-URL — fällt auf den lokalen Legacy-
+    Frontend-Server zurück, wenn dist/ noch gebundelt ist (Abwärtskompat)."""
     time_module.sleep(3.0)
-    url = f'http://127.0.0.1:{FRONTEND_PORT}'
+    if HAS_LOCAL_FRONTEND:
+        url = f'http://127.0.0.1:{FRONTEND_PORT}'
+    else:
+        url = FRONTEND_URL
     log.info(f"webbrowser.open({url})")
     try:
         webbrowser.open(url)
@@ -636,7 +651,8 @@ if __name__ == "__main__":
         if _is_already_running():
             log.info("Port 8000 bereits belegt – App läuft bereits. Browser öffnen und beenden.")
             try:
-                webbrowser.open(f'http://127.0.0.1:{FRONTEND_PORT}')
+                url = f'http://127.0.0.1:{FRONTEND_PORT}' if HAS_LOCAL_FRONTEND else FRONTEND_URL
+                webbrowser.open(url)
             except Exception:
                 pass
             sys.exit(0)

@@ -27,28 +27,21 @@ if not exist "%PYINSTALLER%" (
     pause & exit /b 1
 )
 
-:: ── Schritt 1: Frontend bauen ─────────────────────────────────────────────
-echo [1/4] Frontend Build (Vite)...
+:: ── Schritt 1: Frontend bauen (nur fuer Vercel-Deploy / nicht im Bundle) ─
+:: Hinweis: Ab v1.1.0 wird das Frontend NICHT mehr ins Backend-Bundle
+:: gepackt. Es laeuft komplett aus der Cloud (Vercel). Diese Zeile bauen
+:: wir trotzdem, damit Pre-Push-Checks stimmen.
+echo [1/3] Frontend Build (Vite) — nur fuer Vercel...
 cd /d "%~dp0"
 call npm run build
 if errorlevel 1 (
     echo [FEHLER] Frontend Build fehlgeschlagen!
     pause & exit /b 1
 )
-echo  ^> dist/ erstellt.
+echo  ^> dist/ erstellt (wird nicht im Installer gebundelt).
 
-:: ── Schritt 2: dist/ ins Backend-Verzeichnis kopieren ────────────────────
-echo [2/4] dist/ nach src\backend\dist\ kopieren...
-if exist "src\backend\dist" rmdir /s /q "src\backend\dist"
-xcopy /e /i /q "dist" "src\backend\dist" >nul
-if errorlevel 1 (
-    echo [FEHLER] Kopieren fehlgeschlagen!
-    pause & exit /b 1
-)
-echo  ^> Kopiert.
-
-:: ── Schritt 3: PyInstaller ────────────────────────────────────────────────
-echo [3/4] PyInstaller – Bundle erstellen...
+:: ── Schritt 2: PyInstaller ────────────────────────────────────────────────
+echo [2/3] PyInstaller – Bundle erstellen...
 cd /d "%~dp0src\backend"
 "%PYINSTALLER%" --clean -y --distpath "..\..\release\app" tradestats.spec
 if errorlevel 1 (
@@ -60,8 +53,8 @@ if errorlevel 1 (
 cd /d "%~dp0"
 echo  ^> release\app\TradeStats\ erstellt.
 
-:: ── Schritt 4: Inno Setup Installer ──────────────────────────────────────
-echo [4/4] Installer erstellen (Inno Setup)...
+:: ── Schritt 3: Inno Setup Installer ──────────────────────────────────────
+echo [3/3] Installer erstellen (Inno Setup)...
 
 set ISCC_PATH=C:\Program Files (x86)\Inno Setup 6\ISCC.exe
 if not exist "%ISCC_PATH%" set ISCC_PATH=C:\Program Files\Inno Setup 6\ISCC.exe
