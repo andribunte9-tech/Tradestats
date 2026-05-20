@@ -8,6 +8,7 @@ import { format } from 'date-fns'
 import { useTrades } from '../hooks/useTrades'
 import { usePrivacyMode, Pvt } from '../hooks/usePrivacyMode'
 import { useLiveSync } from '../hooks/useLiveSync'
+import { useLanguage } from '../hooks/useLanguage'
 import { buildMaeRiskStats, buildMarginExposure } from '../utils/analytics'
 
 const RISK_KEY = 'tradestats_risk_percent'
@@ -235,6 +236,7 @@ function TiltDetectorSection({ trades, riskAmount }) {
 
 /* ─── MAE-Risiko-Card (Konzept A) ─────────────────────────── */
 function MaeRiskCard({ trades, mfeArchive, accountBalance }) {
+  const { t } = useLanguage()
   const data = useMemo(
     () => buildMaeRiskStats(trades, mfeArchive, accountBalance || 10000),
     [trades, mfeArchive, accountBalance]
@@ -246,24 +248,24 @@ function MaeRiskCard({ trades, mfeArchive, accountBalance }) {
         <div className="card-header">
           <div className="flex items-center gap-2">
             <Activity size={14} className="text-[#06b6d4]" />
-            <h3 className="text-sm font-semibold text-slate-200">Realisiertes Risiko (MAE)</h3>
+            <h3 className="text-sm font-semibold text-slate-200">{t('rt.mae.title')}</h3>
           </div>
-          <span className="text-xs text-slate-500">Noch zu wenig MFE/MAE-Daten</span>
+          <span className="text-xs text-slate-500">{t('rt.mae.empty')}</span>
         </div>
         <div className="p-4">
-          <p className="text-xs text-slate-500">
-            MFE/MAE-Tracking läuft im Hintergrund über das Live-Sync. Sobald genug Trades archiviert sind ({data?.sampleSize || 0} bisher), erscheint hier dein realisiertes Risiko-Profil.
-          </p>
+          <p className="text-xs text-slate-500">{t('rt.mae.empty_body', { count: data?.sampleSize || 0 })}</p>
         </div>
       </div>
     )
   }
 
+  const p95 = data.p95MaePct.toFixed(1)
+  const abs = data.p95MaeAbs.toFixed(0)
   const verdict = data.p95MaePct > 5
-    ? { color: '#ef4444', label: 'Hohes realisiertes Risiko', msg: `95% deiner Trades blieben unter ${data.p95MaePct.toFixed(1)}% Drawdown — aber das heißt auch: 5% gingen tiefer. Bei deinem Konto sind das ~$${data.p95MaeAbs.toFixed(0)} Schmerz pro Trade. Ohne SL ist der Tail-Worst-Case dein eigentliches Risiko.` }
+    ? { color: '#ef4444', label: t('rt.mae.verdict.bad.title'),  msg: t('rt.mae.verdict.bad.body',  { p95, abs }) }
     : data.p95MaePct > 2
-      ? { color: '#f59e0b', label: 'Moderates Risiko', msg: `95-Perzentil-MAE liegt bei ${data.p95MaePct.toFixed(1)}% des Kontos. Vertretbar, aber im Auge behalten — dort steckt dein "in 1 von 20 Trades"-Worst-Case.` }
-      : { color: '#10b981', label: 'Kontrollierte Drawdowns', msg: `95-Perzentil-MAE bei ${data.p95MaePct.toFixed(1)}%. Du lässt Trades selten tief unter Wasser laufen — auch ohne SL diszipliniert.` }
+      ? { color: '#f59e0b', label: t('rt.mae.verdict.warn.title'), msg: t('rt.mae.verdict.warn.body', { p95 }) }
+      : { color: '#10b981', label: t('rt.mae.verdict.good.title'), msg: t('rt.mae.verdict.good.body', { p95 }) }
 
   const recoveryColor = data.recoveryRate >= 30 ? '#10b981' : data.recoveryRate >= 15 ? '#f59e0b' : '#ef4444'
   const giveBackColor = data.giveBackRate <= 15 ? '#10b981' : data.giveBackRate <= 30 ? '#f59e0b' : '#ef4444'
@@ -273,12 +275,12 @@ function MaeRiskCard({ trades, mfeArchive, accountBalance }) {
       <div className="card-header">
         <div className="flex items-center gap-2">
           <Activity size={14} className="text-[#06b6d4]" />
-          <h3 className="text-sm font-semibold text-slate-200">Realisiertes Risiko (MAE)</h3>
-          <span title="Maximum Adverse Excursion: wie tief ein Trade tatsächlich im Drawdown war, bevor er geschlossen wurde. Für Trader ohne festen SL der ehrlichste Risiko-Indikator.">
+          <h3 className="text-sm font-semibold text-slate-200">{t('rt.mae.title')}</h3>
+          <span title={t('rt.mae.info')}>
             <Info size={11} className="text-slate-500 cursor-help" />
           </span>
         </div>
-        <span className="text-xs text-slate-500">{data.sampleSize} Trades mit MFE/MAE</span>
+        <span className="text-xs text-slate-500">{t('rt.mae.subtitle', { count: data.sampleSize })}</span>
       </div>
       <div className="p-4 space-y-4">
         {/* Verdict */}
@@ -293,30 +295,30 @@ function MaeRiskCard({ trades, mfeArchive, accountBalance }) {
         {/* Kernzahlen */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <div className="rounded-xl border border-[#1f2937] bg-[#0d1117] p-3">
-            <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-1 font-medium">Ø MAE</p>
+            <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-1 font-medium">{t('rt.mae.avg_mae')}</p>
             <p className="text-lg font-mono font-bold text-slate-200"><Pvt value={data.avgMaeAbs} sign={false} /></p>
-            <p className="text-[10px] text-slate-600 font-mono">{data.avgMaePct.toFixed(2)}% Konto</p>
+            <p className="text-[10px] text-slate-600 font-mono">{t('rt.mae.pct_account', { pct: data.avgMaePct.toFixed(2) })}</p>
           </div>
           <div className="rounded-xl border border-[#1f2937] bg-[#0d1117] p-3">
-            <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-1 font-medium">Median</p>
+            <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-1 font-medium">{t('rt.mae.median')}</p>
             <p className="text-lg font-mono font-bold text-slate-200"><Pvt value={data.p50MaeAbs} sign={false} /></p>
-            <p className="text-[10px] text-slate-600 font-mono">{data.p50MaePct.toFixed(2)}% Konto</p>
+            <p className="text-[10px] text-slate-600 font-mono">{t('rt.mae.pct_account', { pct: data.p50MaePct.toFixed(2) })}</p>
           </div>
           <div className="rounded-xl border border-[#f59e0b]/30 bg-[#f59e0b]/5 p-3">
-            <p className="text-[10px] text-[#f59e0b] uppercase tracking-wide mb-1 font-medium">95-Perzentil</p>
+            <p className="text-[10px] text-[#f59e0b] uppercase tracking-wide mb-1 font-medium">{t('rt.mae.p95')}</p>
             <p className="text-lg font-mono font-bold text-[#f59e0b]"><Pvt value={data.p95MaeAbs} sign={false} /></p>
-            <p className="text-[10px] text-[#f59e0b]/80 font-mono">{data.p95MaePct.toFixed(2)}% Konto</p>
+            <p className="text-[10px] text-[#f59e0b]/80 font-mono">{t('rt.mae.pct_account', { pct: data.p95MaePct.toFixed(2) })}</p>
           </div>
           <div className="rounded-xl border border-[#ef4444]/30 bg-[#ef4444]/5 p-3">
-            <p className="text-[10px] text-[#ef4444] uppercase tracking-wide mb-1 font-medium">Worst Case</p>
+            <p className="text-[10px] text-[#ef4444] uppercase tracking-wide mb-1 font-medium">{t('rt.mae.worst')}</p>
             <p className="text-lg font-mono font-bold text-[#ef4444]"><Pvt value={data.maxMaeAbs} sign={false} /></p>
-            <p className="text-[10px] text-[#ef4444]/80 font-mono">{data.maxMaePct.toFixed(2)}% Konto</p>
+            <p className="text-[10px] text-[#ef4444]/80 font-mono">{t('rt.mae.pct_account', { pct: data.maxMaePct.toFixed(2) })}</p>
           </div>
         </div>
 
         {/* Verteilung */}
         <div>
-          <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium mb-2">MAE-Verteilung (% Konto)</p>
+          <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium mb-2">{t('rt.mae.distribution')}</p>
           <ResponsiveContainer width="100%" height={180}>
             <BarChart data={data.histogram} margin={{ top: 5, right: 10, bottom: 0, left: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" vertical={false} />
@@ -330,7 +332,7 @@ function MaeRiskCard({ trades, mfeArchive, accountBalance }) {
                   return (
                     <div className="bg-[#1a2233] border border-[#374151] rounded-lg px-3 py-2 shadow-xl text-xs">
                       <p className="text-slate-400 mb-1">{label} MAE</p>
-                      <p className="text-white font-mono font-semibold">{payload[0].value} Trades · {pct}%</p>
+                      <p className="text-white font-mono font-semibold">{t('rt.mae.tooltip', { count: payload[0].value, pct })}</p>
                     </div>
                   )
                 }}
@@ -348,26 +350,26 @@ function MaeRiskCard({ trades, mfeArchive, accountBalance }) {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div className="rounded-xl border border-[#1f2937] bg-[#0d1117] p-3">
             <div className="flex items-center justify-between mb-1">
-              <span className="text-[10px] text-slate-500 uppercase tracking-wide font-medium">Recovery-Rate</span>
+              <span className="text-[10px] text-slate-500 uppercase tracking-wide font-medium">{t('rt.mae.recovery')}</span>
               <span className="text-base font-mono font-bold" style={{ color: recoveryColor }}>{data.recoveryRate.toFixed(0)}%</span>
             </div>
-            <p className="text-[10px] text-slate-500 leading-relaxed">Trades, die aus negativem MAE in den Gewinn gerettet wurden. Hoch = Geduld zahlt sich aus. Niedrig = du hältst zu lange an Verlierern fest.</p>
+            <p className="text-[10px] text-slate-500 leading-relaxed">{t('rt.mae.recovery_hint')}</p>
           </div>
           <div className="rounded-xl border border-[#1f2937] bg-[#0d1117] p-3">
             <div className="flex items-center justify-between mb-1">
-              <span className="text-[10px] text-slate-500 uppercase tracking-wide font-medium">Give-Back-Rate</span>
+              <span className="text-[10px] text-slate-500 uppercase tracking-wide font-medium">{t('rt.mae.giveback')}</span>
               <span className="text-base font-mono font-bold" style={{ color: giveBackColor }}>{data.giveBackRate.toFixed(0)}%</span>
             </div>
-            <p className="text-[10px] text-slate-500 leading-relaxed">Gewinner, die zu Verlust wurden (positives MFE, negativer Close). Hoch = du sicherst Gewinne nicht ab.</p>
+            <p className="text-[10px] text-slate-500 leading-relaxed">{t('rt.mae.giveback_hint')}</p>
           </div>
           <div className="rounded-xl border border-[#1f2937] bg-[#0d1117] p-3">
             <div className="flex items-center justify-between mb-1">
-              <span className="text-[10px] text-slate-500 uppercase tracking-wide font-medium">Ø R-MAE</span>
+              <span className="text-[10px] text-slate-500 uppercase tracking-wide font-medium">{t('rt.mae.rmae')}</span>
               <span className="text-base font-mono font-bold" style={{ color: data.avgRMae >= 1 ? '#10b981' : data.avgRMae >= 0 ? '#f59e0b' : '#ef4444' }}>
                 {data.avgRMae >= 0 ? '+' : ''}{data.avgRMae.toFixed(2)}R
               </span>
             </div>
-            <p className="text-[10px] text-slate-500 leading-relaxed">Ehrliches R-Multiple: realisierter P&L geteilt durch erlebten MAE. „Wie viel mitgenommen pro Einheit Schmerz?"</p>
+            <p className="text-[10px] text-slate-500 leading-relaxed">{t('rt.mae.rmae_hint')}</p>
           </div>
         </div>
       </div>
@@ -377,6 +379,7 @@ function MaeRiskCard({ trades, mfeArchive, accountBalance }) {
 
 /* ─── Margin-Exposure-Card (Konzept B) ────────────────────── */
 function MarginExposureCard({ trades, leverage, accountBalance }) {
+  const { t } = useLanguage()
   const data = useMemo(
     () => buildMarginExposure(trades, { leverage: leverage || 100, accountBalance: accountBalance || 10000 }),
     [trades, leverage, accountBalance]
@@ -384,11 +387,13 @@ function MarginExposureCard({ trades, leverage, accountBalance }) {
 
   if (!data || data.sampleSize < 3) return null
 
+  const avg = data.avgMarginPct.toFixed(0)
+  const max = data.maxConcurrentMarginPct.toFixed(0)
   const verdict = data.avgMarginPct > 50
-    ? { color: '#ef4444', label: 'Sehr hohe Hebel-Belegung', msg: `Im Schnitt sind ${data.avgMarginPct.toFixed(0)}% deines Kontos in Margin gebunden. Eine kleine Marktbewegung gegen dich kann zu Margin-Calls führen — ohne SL keine Reserve.` }
+    ? { color: '#ef4444', label: t('rt.margin.verdict.bad.title'),  msg: t('rt.margin.verdict.bad.body',  { avg }) }
     : data.avgMarginPct > 20
-      ? { color: '#f59e0b', label: 'Moderate Hebel-Belegung', msg: `Ø ${data.avgMarginPct.toFixed(0)}% Margin-Belegung. Akzeptabel, aber maximal gleichzeitig ${data.maxConcurrentMarginPct.toFixed(0)}% — bei größeren Bewegungen wird's eng.` }
-      : { color: '#10b981', label: 'Konservatives Sizing', msg: `Nur ${data.avgMarginPct.toFixed(0)}% Margin pro Trade. Genug Puffer für Adverse Moves, auch ohne SL.` }
+      ? { color: '#f59e0b', label: t('rt.margin.verdict.warn.title'), msg: t('rt.margin.verdict.warn.body', { avg, max }) }
+      : { color: '#10b981', label: t('rt.margin.verdict.good.title'), msg: t('rt.margin.verdict.good.body', { avg }) }
 
   const liqColor = data.liquidationMovePct > 10 ? '#10b981' : data.liquidationMovePct > 3 ? '#f59e0b' : '#ef4444'
   const cvColor  = data.volumeCV < 0.3 ? '#10b981' : data.volumeCV < 0.7 ? '#f59e0b' : '#ef4444'
@@ -398,12 +403,12 @@ function MarginExposureCard({ trades, leverage, accountBalance }) {
       <div className="card-header">
         <div className="flex items-center gap-2">
           <Anchor size={14} className="text-[#8b5cf6]" />
-          <h3 className="text-sm font-semibold text-slate-200">Margin- & Exposure-Risiko</h3>
-          <span title="Schätzt die Margin-Belegung pro Trade basierend auf Hebel und Notional-Value. Ohne SL ist die Margin-Distanz dein eigentliches 'Stop-Loss' — bei zu hoher Belegung kann eine kleine Marktbewegung dich liquidieren.">
+          <h3 className="text-sm font-semibold text-slate-200">{t('rt.margin.title')}</h3>
+          <span title={t('rt.margin.info')}>
             <Info size={11} className="text-slate-500 cursor-help" />
           </span>
         </div>
-        <span className="text-xs text-slate-500">Hebel 1:{data.leverage}</span>
+        <span className="text-xs text-slate-500">{t('rt.margin.leverage', { lev: data.leverage })}</span>
       </div>
       <div className="p-4 space-y-4">
         {/* Verdict */}
@@ -418,24 +423,24 @@ function MarginExposureCard({ trades, leverage, accountBalance }) {
         {/* Kernzahlen */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <div className="rounded-xl border border-[#1f2937] bg-[#0d1117] p-3">
-            <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-1 font-medium">Ø Margin/Trade</p>
+            <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-1 font-medium">{t('rt.margin.avg')}</p>
             <p className="text-lg font-mono font-bold text-slate-200"><Pvt value={data.avgMargin} sign={false} /></p>
-            <p className="text-[10px] text-slate-600 font-mono">{data.avgMarginPct.toFixed(1)}% Konto</p>
+            <p className="text-[10px] text-slate-600 font-mono">{t('rt.mae.pct_account', { pct: data.avgMarginPct.toFixed(1) })}</p>
           </div>
           <div className="rounded-xl border border-[#1f2937] bg-[#0d1117] p-3">
-            <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-1 font-medium">95-Perzentil</p>
+            <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-1 font-medium">{t('rt.margin.p95')}</p>
             <p className="text-lg font-mono font-bold text-slate-200"><Pvt value={data.p95Margin} sign={false} /></p>
-            <p className="text-[10px] text-slate-600 font-mono">~Worst-Case-Trade</p>
+            <p className="text-[10px] text-slate-600 font-mono">{t('rt.margin.p95_hint')}</p>
           </div>
           <div className="rounded-xl border border-[#f59e0b]/30 bg-[#f59e0b]/5 p-3">
-            <p className="text-[10px] text-[#f59e0b] uppercase tracking-wide mb-1 font-medium">Max. parallel</p>
+            <p className="text-[10px] text-[#f59e0b] uppercase tracking-wide mb-1 font-medium">{t('rt.margin.max_parallel')}</p>
             <p className="text-lg font-mono font-bold text-[#f59e0b]"><Pvt value={data.maxConcurrentMargin} sign={false} /></p>
-            <p className="text-[10px] text-[#f59e0b]/80 font-mono">{data.maxConcurrentMarginPct.toFixed(1)}% Konto gleichzeitig</p>
+            <p className="text-[10px] text-[#f59e0b]/80 font-mono">{t('rt.margin.max_parallel_hint', { pct: data.maxConcurrentMarginPct.toFixed(1) })}</p>
           </div>
           <div className="rounded-xl border p-3" style={{ borderColor: liqColor + '40', backgroundColor: liqColor + '0a' }}>
-            <p className="text-[10px] uppercase tracking-wide mb-1 font-medium" style={{ color: liqColor }}>Liquidations-Move</p>
+            <p className="text-[10px] uppercase tracking-wide mb-1 font-medium" style={{ color: liqColor }}>{t('rt.margin.liq_move')}</p>
             <p className="text-lg font-mono font-bold" style={{ color: liqColor }}>~{data.liquidationMovePct.toFixed(1)}%</p>
-            <p className="text-[10px] font-mono" style={{ color: liqColor + 'b0' }}>gegen dich tolerierbar</p>
+            <p className="text-[10px] font-mono" style={{ color: liqColor + 'b0' }}>{t('rt.margin.liq_move_hint')}</p>
           </div>
         </div>
 
@@ -443,27 +448,25 @@ function MarginExposureCard({ trades, leverage, accountBalance }) {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div className="rounded-xl border border-[#1f2937] bg-[#0d1117] p-3">
             <div className="flex items-center justify-between mb-1">
-              <span className="text-[10px] text-slate-500 uppercase tracking-wide font-medium">Volumen-Konsistenz</span>
+              <span className="text-[10px] text-slate-500 uppercase tracking-wide font-medium">{t('rt.margin.vol_cv')}</span>
               <span className="text-sm font-mono font-bold" style={{ color: cvColor }}>CV {data.volumeCV.toFixed(2)}</span>
             </div>
             <p className="text-[10px] text-slate-500 leading-relaxed">
-              Variation deiner Lot-Größen. {data.volumeCV < 0.3 ? 'Sehr konsistent — Sizing aus dem Plan.' : data.volumeCV < 0.7 ? 'Moderate Streuung — okay, wenn bewusst.' : 'Stark schwankend — Verdacht auf Stimmungs-Sizing.'}
+              {data.volumeCV < 0.3 ? t('rt.margin.vol_cv_low') : data.volumeCV < 0.7 ? t('rt.margin.vol_cv_med') : t('rt.margin.vol_cv_high')}
             </p>
           </div>
           <div className="rounded-xl border border-[#1f2937] bg-[#0d1117] p-3">
             <div className="flex items-center justify-between mb-1">
-              <span className="text-[10px] text-slate-500 uppercase tracking-wide font-medium">Margin-Stunden</span>
+              <span className="text-[10px] text-slate-500 uppercase tracking-wide font-medium">{t('rt.margin.margin_hours')}</span>
               <span className="text-sm font-mono font-bold text-slate-300">
                 <Pvt value={data.totalMarginHours / 1000} sign={false} decimals={1} />K
               </span>
             </div>
-            <p className="text-[10px] text-slate-500 leading-relaxed">$ × Stunden Margin-Belegung gesamt. Wenig sagt: kurze, fokussierte Trades. Viel: Kapital lange gebunden, mehr Tail-Exposure.</p>
+            <p className="text-[10px] text-slate-500 leading-relaxed">{t('rt.margin.margin_hours_hint')}</p>
           </div>
         </div>
 
-        <p className="text-[11px] text-slate-500">
-          Margin grob geschätzt aus Notional ÷ Hebel — exakte Werte je nach Symbol-Spec leicht abweichend. Liquidations-Move = vereinfachte Schätzung für Einzeltrade, ignoriert weitere Positionen.
-        </p>
+        <p className="text-[11px] text-slate-500">{t('rt.margin.footer')}</p>
       </div>
     </div>
   )
@@ -508,6 +511,7 @@ export default function RiskTab() {
   const { effectiveTrades }               = useTrades()
   const { privacyMode, accountBalance }   = usePrivacyMode()
   const { mfeMae, status }                = useLiveSync()
+  const { t }                             = useLanguage()
   const mfeArchive = mfeMae?.archive || {}
   const liveLeverage = status?.account?.leverage || 100
 
@@ -607,7 +611,7 @@ export default function RiskTab() {
       {/* ── Klassisches Risiko-Modell (theoretisch) ── */}
       <div className="flex items-center gap-2 mt-2">
         <div className="flex-1 h-px bg-[#1f2937]" />
-        <span className="text-[10px] uppercase tracking-wider text-slate-600 font-medium">Klassisches SL-Modell (theoretisch)</span>
+        <span className="text-[10px] uppercase tracking-wider text-slate-600 font-medium">{t('rt.classic_divider')}</span>
         <div className="flex-1 h-px bg-[#1f2937]" />
       </div>
 

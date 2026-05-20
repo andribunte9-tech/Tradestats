@@ -2,47 +2,32 @@ import { useState, useEffect, useMemo } from 'react'
 import {
   Download, CheckCircle2, AlertCircle, Loader2, MonitorSmartphone,
   Activity, ExternalLink, ChevronRight, X, Info, ShieldCheck, MousePointerClick,
+  Globe,
 } from 'lucide-react'
 import { useBackendStatus } from '../hooks/useBackendStatus'
+import { useLanguage } from '../hooks/useLanguage'
 
-// URL des aktuellen Connector-Installers. Sobald wir das GitHub-Release
-// erstellt haben, zeigt dieser Link auf die "latest"-Version. Bis dahin:
-// auf die Release-Seite zum manuellen Herunterladen.
 const CONNECTOR_DOWNLOAD_URL =
   'https://github.com/andribunte9-tech/Tradestats/releases/latest'
 const CONNECTOR_REPO_URL =
   'https://github.com/andribunte9-tech/Tradestats'
 
-/**
- * Hightech Setup-Wizard, der den Connector-Status erkennt und durch die
- * Installation führt. Verhält sich wie ein Modal:
- *  - state='offline'      → Vollbild-Wizard mit 4 Schritten
- *  - state='backend_only' → kompakte Fehlerbox (MT5 nicht verbunden)
- *  - state='connected'    → nicht sichtbar
- *
- * Wenn der Status während der Installation 'connected' wird, schließt
- * sich das Modal automatisch nach 2 Sekunden + zeigt einen Erfolgs-Schritt.
- */
 export function SetupGate({ children }) {
   const status = useBackendStatus()
   const [dismissed, setDismissed] = useState(() => {
-    // Permanent dismissable: User kann "Ohne Connector weitermachen" wählen.
-    // Speicherung als Session-Storage, nicht localStorage — wenn der Browser
-    // einmal geschlossen wird, fragt der Wizard wieder.
     return sessionStorage.getItem('tradestats_setup_dismissed') === '1'
   })
+  const { t } = useLanguage()
 
   function dismiss() {
     sessionStorage.setItem('tradestats_setup_dismissed', '1')
     setDismissed(true)
   }
 
-  // Wenn alles ok ist oder User abgewinkt hat → normales UI
   if (status.state === 'connected' || dismissed) {
     return (
       <>
         {children}
-        {/* Mini-Status-Badge wenn dismissed-but-offline (oben rechts in der Sidebar) */}
         {(status.state === 'offline' || status.state === 'backend_only') && (
           <ConnectorStatusBadge status={status} onShow={() => {
             sessionStorage.removeItem('tradestats_setup_dismissed')
@@ -53,13 +38,12 @@ export function SetupGate({ children }) {
     )
   }
 
-  // Initial-Check läuft noch → kein Wizard zeigen, App auch nicht (Splash)
   if (status.state === 'unknown' || status.state === 'checking') {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#0d1117]">
         <div className="flex items-center gap-3 text-slate-500">
           <Loader2 size={18} className="animate-spin" />
-          <span className="text-sm">Verbinde mit TradeStats-Connector...</span>
+          <span className="text-sm">{t('setup.checking')}</span>
         </div>
       </div>
     )
@@ -68,10 +52,31 @@ export function SetupGate({ children }) {
   return <SetupWizard status={status} onDismiss={dismiss} />
 }
 
+function LanguageToggle() {
+  const { language, setLanguage } = useLanguage()
+  return (
+    <div className="inline-flex items-center gap-0.5 bg-[#1a2233] border border-[#2d3748] rounded-lg p-0.5">
+      <Globe size={11} className="text-slate-500 ml-1.5" />
+      {['de', 'en'].map(lng => (
+        <button
+          key={lng}
+          onClick={() => setLanguage(lng)}
+          className={`px-2 py-0.5 rounded-md text-[11px] font-semibold uppercase transition-colors
+            ${language === lng
+              ? 'bg-[#3b82f6]/15 text-[#3b82f6]'
+              : 'text-slate-500 hover:text-slate-300'}`}
+        >
+          {lng}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 function SetupWizard({ status, onDismiss }) {
+  const { t } = useLanguage()
   const [installerClicked, setInstallerClicked] = useState(false)
 
-  // Schritt-Logik abhängig vom aktuellen Status
   const steps = useMemo(() => {
     const installed = status.state !== 'offline'
     const connected = status.state === 'connected'
@@ -79,8 +84,8 @@ function SetupWizard({ status, onDismiss }) {
     return [
       {
         id: 'download',
-        title: 'Connector herunterladen',
-        body: 'Lade den TradeStats-Connector herunter — ein kleines Programm, das deine MT5-Daten an diese Web-App liefert.',
+        title: t('setup.step1.title'),
+        body: t('setup.step1.body'),
         done: installerClicked || installed,
         action: (
           <a
@@ -91,80 +96,75 @@ function SetupWizard({ status, onDismiss }) {
             className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#3b82f6] hover:bg-[#2563eb]
               text-white text-sm font-semibold transition-colors"
           >
-            <Download size={15} /> Connector herunterladen
+            <Download size={15} /> {t('setup.step1.action')}
             <ExternalLink size={12} className="opacity-60" />
           </a>
         ),
       },
       {
         id: 'install',
-        title: 'Installer ausführen',
-        body: 'Doppelklick auf TradeStats_Setup.exe. Folge dem Setup-Assistenten — keine besonderen Optionen nötig. Dauert ca. 30 Sek.',
+        title: t('setup.step2.title'),
+        body: t('setup.step2.body'),
         done: installed,
         extraContent: <SmartScreenHint />,
       },
       {
         id: 'mt5',
-        title: 'MetaTrader 5 öffnen',
-        body: 'Starte deinen MT5-Terminal und logge dich in dein Konto ein. Der Connector spricht über die MT5-Python-API und braucht ein aktives Terminal-Login.',
+        title: t('setup.step3.title'),
+        body: t('setup.step3.body'),
         done: installed && mt5Open,
-        hint: 'Demo-Account funktioniert genauso wie ein Live-Account.',
+        hint: t('setup.step3.hint'),
       },
       {
         id: 'connect',
-        title: 'Connector starten',
-        body: installed
-          ? 'Connector läuft ✓ — wir warten nur noch auf die MT5-Verbindung.'
-          : 'Starte den TradeStats-Connector (Desktop-Verknüpfung oder Startmenü). Ein Konsolen-Fenster öffnet sich und bleibt offen. Dieses Fenster nicht schließen — solange du tradest.',
+        title: t('setup.step4.title'),
+        body: installed ? t('setup.step4.body_done') : t('setup.step4.body'),
         done: connected,
-        hint: connected
-          ? null
-          : 'Falls Windows-Firewall fragt: "Zugriff zulassen" — der Connector hört nur auf localhost (127.0.0.1).',
+        hint: connected ? null : t('setup.step4.hint'),
       },
     ]
-  }, [status.state, installerClicked])
+  }, [status.state, installerClicked, t])
 
   const currentStepIdx = steps.findIndex(s => !s.done)
   const isFullyConnected = status.state === 'connected'
 
-  // Wenn frisch verbunden: 2s Erfolgs-Anzeige, dann Wizard schließen
   useEffect(() => {
     if (isFullyConnected) {
-      const t = setTimeout(() => onDismiss(), 1800)
-      return () => clearTimeout(t)
+      const tt = setTimeout(() => onDismiss(), 1800)
+      return () => clearTimeout(tt)
     }
   }, [isFullyConnected, onDismiss])
 
   return (
-    <div className="min-h-screen bg-[#0d1117] flex items-center justify-center p-6">
+    <div className="min-h-screen bg-[#0d1117] flex items-center justify-center p-6 relative">
+      {/* Language toggle in der Ecke */}
+      <div className="absolute top-4 right-4">
+        <LanguageToggle />
+      </div>
+
       <div className="w-full max-w-2xl">
-        {/* Header */}
         <div className="text-center mb-8">
           <div className="inline-flex p-3 rounded-2xl bg-[#3b82f6]/15 border border-[#3b82f6]/30 mb-4">
             <MonitorSmartphone size={28} className="text-[#3b82f6]" />
           </div>
-          <h1 className="text-2xl font-bold text-white mb-2">Willkommen bei TradeStats</h1>
+          <h1 className="text-2xl font-bold text-white mb-2">{t('setup.welcome')}</h1>
           <p className="text-sm text-slate-400 max-w-md mx-auto leading-relaxed">
-            Damit diese Web-App deine MT5-Trades sehen kann, brauchst du einmalig den TradeStats-Connector auf deinem PC.
-            Das dauert ~2 Minuten.
+            {t('setup.welcome_subtitle')}
           </p>
         </div>
 
-        {/* Erfolgs-Screen wenn verbunden */}
         {isFullyConnected ? (
           <div className="rounded-2xl border border-[#10b981]/40 bg-[#10b981]/10 p-6 text-center">
             <div className="inline-flex p-3 rounded-full bg-[#10b981]/20 mb-3">
               <CheckCircle2 size={32} className="text-[#10b981]" />
             </div>
-            <h2 className="text-lg font-semibold text-[#10b981] mb-1">Connector verbunden!</h2>
-            <p className="text-sm text-slate-300">Lade jetzt deine Trades... du wirst gleich umgeleitet.</p>
+            <h2 className="text-lg font-semibold text-[#10b981] mb-1">{t('setup.success.title')}</h2>
+            <p className="text-sm text-slate-300">{t('setup.success.body')}</p>
           </div>
         ) : (
           <>
-            {/* Status-Banner */}
             <StatusBanner status={status} />
 
-            {/* Schritt-Liste */}
             <div className="space-y-2.5 mt-6">
               {steps.map((step, idx) => (
                 <StepCard
@@ -177,38 +177,35 @@ function SetupWizard({ status, onDismiss }) {
               ))}
             </div>
 
-            {/* Aktuelle Aktion / großer CTA */}
             {currentStepIdx === 0 && (
               <div className="mt-6 text-center">
                 {steps[0].action}
               </div>
             )}
 
-            {/* Warte-Hinweis bei Schritten 2-4 */}
             {currentStepIdx > 0 && currentStepIdx < steps.length && (
               <div className="mt-6 rounded-xl border border-[#1f2937] bg-[#1a2233] p-4 flex items-center gap-3">
                 <Loader2 size={16} className="text-[#3b82f6] animate-spin shrink-0" />
                 <div className="text-[12px] text-slate-400 leading-relaxed">
-                  Ich prüfe alle 3 Sekunden, ob der Connector erreichbar ist. Sobald er läuft, geht's automatisch weiter — du brauchst hier nichts zu klicken.
+                  {t('setup.waiting_hint')}
                 </div>
               </div>
             )}
 
-            {/* Footer: Skip-Link + Repo-Link */}
-            <div className="mt-8 flex items-center justify-between text-xs">
+            <div className="mt-8 flex items-center justify-between text-xs gap-3 flex-wrap">
               <a
                 href={CONNECTOR_REPO_URL}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-slate-500 hover:text-slate-300 inline-flex items-center gap-1"
               >
-                <Info size={11} /> Was ist der Connector? <ExternalLink size={10} />
+                <Info size={11} /> {t('setup.about_connector')} <ExternalLink size={10} />
               </a>
               <button
                 onClick={onDismiss}
                 className="text-slate-500 hover:text-slate-300 inline-flex items-center gap-1"
               >
-                Ohne Connector weitermachen (CSV-Import) <ChevronRight size={12} />
+                {t('setup.skip_csv')} <ChevronRight size={12} />
               </button>
             </div>
           </>
@@ -219,23 +216,24 @@ function SetupWizard({ status, onDismiss }) {
 }
 
 function StatusBanner({ status }) {
+  const { t } = useLanguage()
   const config = {
     offline: {
       color: '#ef4444',
       icon: AlertCircle,
-      title: 'Connector noch nicht gestartet',
-      body: 'TradeStats-Connector unter ' + status.apiUrl + ' nicht erreichbar.',
+      title: t('setup.banner.offline.title'),
+      body: t('setup.banner.offline.body', { url: status.apiUrl }),
     },
     backend_only: {
       color: '#f59e0b',
       icon: AlertCircle,
-      title: 'Connector läuft — MT5 fehlt',
-      body: status.error || 'MetaTrader 5 ist nicht verbunden. Bitte MT5 öffnen und einloggen.',
+      title: t('setup.banner.backend_only.title'),
+      body: status.error || t('setup.banner.backend_only.body'),
     },
   }[status.state] || {
     color: '#3b82f6',
     icon: Activity,
-    title: 'Prüfe Verbindung...',
+    title: t('setup.banner.checking.title'),
     body: '',
   }
   const Icon = config.icon
@@ -289,12 +287,8 @@ function StepCard({ index, step, isActive, isLastDone }) {
   )
 }
 
-/**
- * Erklärt die Windows-SmartScreen-Warnung, die beim ersten Start des
- * unsignierten Installers erscheint. Zeigt die beiden nötigen Klicks
- * visuell, damit nervöse User wissen: das ist OK, nicht abbrechen.
- */
 function SmartScreenHint() {
+  const { t } = useLanguage()
   const [expanded, setExpanded] = useState(false)
   return (
     <div className="rounded-xl border border-[#3b82f6]/30 bg-[#3b82f6]/8 overflow-hidden">
@@ -306,7 +300,7 @@ function SmartScreenHint() {
         <div className="flex items-center gap-2 min-w-0">
           <ShieldCheck size={14} className="text-[#3b82f6] shrink-0" />
           <span className="text-[12px] font-semibold text-[#3b82f6]">
-            Windows zeigt eine Warnung? Das ist normal — so klickst du sie weg
+            {t('setup.ss.toggle')}
           </span>
         </div>
         <ChevronRight
@@ -318,33 +312,36 @@ function SmartScreenHint() {
       {expanded && (
         <div className="px-3 pb-3 space-y-3">
           <p className="text-[11px] text-slate-400 leading-relaxed">
-            Beim ersten Start blockiert <strong className="text-slate-300">Windows Defender SmartScreen</strong> den Installer,
-            weil er nicht von Microsoft signiert ist. Code-Signing-Zertifikate kosten 300+ €/Jahr — für ein Hobbyprojekt
-            unverhältnismäßig. Der Code ist <strong className="text-slate-300">offen einsehbar auf GitHub</strong>,
-            du kannst dich also selbst überzeugen, dass nichts Bösartiges drin ist.
+            {/* explain uses inline placeholders for bold sub-elements */}
+            {t('setup.ss.explain')
+              .split('{dfdr}').join('§DFDR§')
+              .split('{github}').join('§GH§')
+              .split(/(§DFDR§|§GH§)/)
+              .map((chunk, i) => {
+                if (chunk === '§DFDR§') return <strong key={i} className="text-slate-300">{t('setup.ss.defender')}</strong>
+                if (chunk === '§GH§') return <strong key={i} className="text-slate-300">{t('setup.ss.github_open')}</strong>
+                return <span key={i}>{chunk}</span>
+              })}
           </p>
 
-          {/* Mock-Dialog 1: Initialer SmartScreen */}
           <div className="rounded-lg overflow-hidden border border-[#1f2937]">
             <div className="bg-[#0078D4] px-3 py-2 flex items-center justify-between">
-              <span className="text-[10px] font-semibold text-white">Microsoft Defender SmartScreen</span>
+              <span className="text-[10px] font-semibold text-white">{t('setup.ss.defender')}</span>
               <X size={11} className="text-white/60" />
             </div>
             <div className="bg-[#1a2233] px-3 py-2.5 space-y-1.5">
-              <p className="text-[11px] font-bold text-white">Der Computer wurde durch Windows geschützt</p>
-              <p className="text-[10px] text-slate-400 leading-relaxed">
-                Von Microsoft Defender SmartScreen wurde der Start einer unbekannten App verhindert.
-              </p>
+              <p className="text-[11px] font-bold text-white">{t('setup.ss.protected_title')}</p>
+              <p className="text-[10px] text-slate-400 leading-relaxed">{t('setup.ss.body1')}</p>
               <div className="flex items-center gap-1.5 pt-1">
                 <MousePointerClick size={11} className="text-[#10b981] shrink-0 animate-pulse" />
                 <span className="text-[10px] text-[#10b981] font-semibold underline">
-                  Weitere Informationen
+                  {t('setup.ss.more_info')}
                 </span>
-                <span className="text-[10px] text-slate-500">← 1. Klick hier</span>
+                <span className="text-[10px] text-slate-500">{t('setup.ss.click_1')}</span>
               </div>
               <div className="flex justify-end pt-1">
                 <span className="text-[10px] text-slate-600 px-2 py-1 border border-[#374151] rounded">
-                  Nicht ausführen
+                  {t('setup.ss.dont_run')}
                 </span>
               </div>
             </div>
@@ -352,36 +349,36 @@ function SmartScreenHint() {
 
           <div className="flex items-center gap-2 text-[10px] text-slate-500">
             <div className="flex-1 h-px bg-[#1f2937]" />
-            <span>Danach erscheint ein neuer Button:</span>
+            <span>{t('setup.ss.between')}</span>
             <div className="flex-1 h-px bg-[#1f2937]" />
           </div>
 
-          {/* Mock-Dialog 2: Nach Klick auf "Weitere Informationen" */}
           <div className="rounded-lg overflow-hidden border border-[#1f2937]">
             <div className="bg-[#0078D4] px-3 py-2">
-              <span className="text-[10px] font-semibold text-white">Microsoft Defender SmartScreen</span>
+              <span className="text-[10px] font-semibold text-white">{t('setup.ss.defender')}</span>
             </div>
             <div className="bg-[#1a2233] px-3 py-2.5 space-y-1.5">
-              <p className="text-[11px] font-bold text-white">Der Computer wurde durch Windows geschützt</p>
-              <p className="text-[10px] text-slate-400">App: <span className="text-slate-300 font-mono">TradeStats_Setup.exe</span></p>
+              <p className="text-[11px] font-bold text-white">{t('setup.ss.protected_title')}</p>
+              <p className="text-[10px] text-slate-400">
+                {t('setup.ss.app_label')} <span className="text-slate-300 font-mono">TradeStats_Setup.exe</span>
+              </p>
               <div className="flex justify-end gap-1.5 pt-2">
                 <div className="flex items-center gap-1.5">
                   <MousePointerClick size={11} className="text-[#10b981] shrink-0 animate-pulse" />
-                  <span className="text-[10px] text-slate-500">2. Klick hier →</span>
+                  <span className="text-[10px] text-slate-500">{t('setup.ss.click_2')}</span>
                 </div>
                 <span className="text-[10px] text-white px-2 py-1 bg-[#10b981] rounded font-semibold">
-                  Trotzdem ausführen
+                  {t('setup.ss.run_anyway')}
                 </span>
                 <span className="text-[10px] text-slate-600 px-2 py-1 border border-[#374151] rounded">
-                  Nicht ausführen
+                  {t('setup.ss.dont_run')}
                 </span>
               </div>
             </div>
           </div>
 
           <p className="text-[11px] text-slate-500 italic pt-1">
-            Sobald du einmal „Trotzdem ausführen" geklickt hast, merkt sich Windows die Entscheidung —
-            beim nächsten Start kommt die Warnung nicht mehr.
+            {t('setup.ss.footer')}
           </p>
         </div>
       )}
@@ -389,14 +386,11 @@ function SmartScreenHint() {
   )
 }
 
-/**
- * Kompakter Status-Badge unten rechts, wenn der User den Wizard
- * weggeklickt hat, das Backend aber weiterhin offline ist.
- */
 function ConnectorStatusBadge({ status, onShow }) {
+  const { t } = useLanguage()
   const config = {
-    offline: { color: '#ef4444', label: 'Connector offline' },
-    backend_only: { color: '#f59e0b', label: 'MT5 nicht verbunden' },
+    offline:      { color: '#ef4444', label: t('setup.badge.offline') },
+    backend_only: { color: '#f59e0b', label: t('setup.badge.mt5_off') },
   }[status.state]
   if (!config) return null
   return (
@@ -405,7 +399,7 @@ function ConnectorStatusBadge({ status, onShow }) {
       className="fixed bottom-4 right-4 z-50 flex items-center gap-2 px-3 py-2 rounded-full
         bg-[#1a2233] border shadow-lg text-xs font-medium hover:scale-105 transition-transform"
       style={{ borderColor: config.color + '60', color: config.color }}
-      title="Setup-Anleitung wieder anzeigen"
+      title={t('setup.badge.show_tooltip')}
     >
       <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: config.color }} />
       {config.label}

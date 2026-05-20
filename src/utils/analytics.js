@@ -1347,27 +1347,37 @@ export function buildMarginExposure(trades, { leverage = 100, accountBalance = 1
  * Build a list of coaching insights from trade data.
  * Each insight: { severity: 'good'|'warn'|'bad'|'tip', title, message }
  */
+/**
+ * Generiert eine Liste von Insights als Übersetzungs-Keys + Variablen.
+ * Die UI kümmert sich um die eigentliche Sprach-Übersetzung — diese Funktion
+ * macht nur die numerische Auswertung.
+ *
+ * Rückgabeformat: { severity, titleKey, messageKey, vars }
+ */
 export function buildCoachInsights(trades, { stats, pareto, streak, mfeMae, sequence, consistency, recovery, ror } = {}) {
   const insights = []
   if (!trades.length) return insights
+  const push = (severity, titleKey, messageKey, vars = {}) =>
+    insights.push({ severity, titleKey, messageKey, vars })
 
   // ── Win Rate ──
   if (stats?.winRate != null && stats.totalTrades >= 10) {
     if (stats.winRate >= 60) {
-      insights.push({ severity: 'good', title: 'Hohe Win-Rate', message: `${stats.winRate.toFixed(0)}% Trefferquote über ${stats.totalTrades} Trades — du triffst öfter als du daneben liegst. Achte trotzdem darauf, dass deine Gewinner größer sind als deine Verlierer.` })
+      push('good', 'ci.high_wr.title', 'ci.high_wr.body', { wr: stats.winRate.toFixed(0), n: stats.totalTrades })
     } else if (stats.winRate < 40) {
-      insights.push({ severity: 'warn', title: 'Niedrige Win-Rate', message: `Nur ${stats.winRate.toFixed(0)}% deiner Trades sind Gewinner. Das ist nicht zwangsläufig schlecht (Trend-Follower haben oft <40%) — aber deine R-Ratio muss dann stimmen. Check deinen Profit-Faktor unten.` })
+      push('warn', 'ci.low_wr.title', 'ci.low_wr.body', { wr: stats.winRate.toFixed(0) })
     }
   }
 
   // ── Profit Factor ──
   if (stats?.profitFactor != null && stats.totalTrades >= 10) {
+    const pf = stats.profitFactor === Infinity ? '∞' : stats.profitFactor.toFixed(2)
     if (stats.profitFactor >= 2) {
-      insights.push({ severity: 'good', title: 'Starker Profit-Faktor', message: `Profit-Faktor ${stats.profitFactor === Infinity ? '∞' : stats.profitFactor.toFixed(2)} — du verdienst pro $1 Verlust mehr als $2. Das ist eine saubere Edge.` })
+      push('good', 'ci.strong_pf.title', 'ci.strong_pf.body', { pf })
     } else if (stats.profitFactor < 1 && stats.profitFactor > 0) {
-      insights.push({ severity: 'bad', title: 'Profit-Faktor unter 1', message: `Du verlierst pro $1 Gewinn mehr als $1. Entweder Stops zu weit, Targets zu eng — oder du tradest gegen deine eigene Statistik. Schau dir die Pareto-Analyse und Best-vs-Worst an, um den Hebel zu finden.` })
+      push('bad', 'ci.weak_pf.title', 'ci.weak_pf.body')
     } else if (stats.profitFactor < 1.3 && stats.profitFactor >= 1) {
-      insights.push({ severity: 'tip', title: 'Knapper Profit-Faktor', message: `Profit-Faktor ${stats.profitFactor.toFixed(2)} — knapp über break-even. Kleine Verschlechterung (mehr Spread, schlechtere Phase) und du bist rot. Lass die Verlierer kleiner werden oder Gewinner größer.` })
+      push('tip', 'ci.thin_pf.title', 'ci.thin_pf.body', { pf })
     }
   }
 
@@ -1375,9 +1385,9 @@ export function buildCoachInsights(trades, { stats, pareto, streak, mfeMae, sequ
   if (stats?.avgWin && stats?.avgLoss) {
     const rr = stats.avgWin / stats.avgLoss
     if (rr < 1) {
-      insights.push({ severity: 'warn', title: 'R:R unter 1', message: `Dein durchschnittlicher Gewinner ($${stats.avgWin.toFixed(0)}) ist kleiner als dein durchschnittlicher Verlierer ($${stats.avgLoss.toFixed(0)}). Klassisches Symptom: Du schließt Gewinner zu früh aus Angst, Verlierer zu spät in der Hoffnung. Check die MFE/MAE-Capture-Rate.` })
+      push('warn', 'ci.bad_rr.title', 'ci.bad_rr.body', { win: stats.avgWin.toFixed(0), loss: stats.avgLoss.toFixed(0) })
     } else if (rr >= 2) {
-      insights.push({ severity: 'good', title: 'Solides R:R', message: `Durchschnittlicher Gewinner ist ${rr.toFixed(1)}x so groß wie durchschnittlicher Verlierer. Du lässt Gewinner laufen — bleib dabei.` })
+      push('good', 'ci.good_rr.title', 'ci.good_rr.body', { rr: rr.toFixed(1) })
     }
   }
 
@@ -1385,19 +1395,26 @@ export function buildCoachInsights(trades, { stats, pareto, streak, mfeMae, sequ
   if (pareto?.topNCovers80 != null && trades.length >= 20) {
     const concentration = pareto.topNCovers80 / trades.length
     if (concentration < 0.1) {
-      insights.push({ severity: 'warn', title: 'Edge hängt an wenigen Trades', message: `Nur ${pareto.topNCovers80} von ${trades.length} Trades (${(concentration * 100).toFixed(0)}%) machen 80% deines Bruttogewinns. Verlierst du diese Ausreißer (Glück? Spezielle Marktphase?), kollabiert deine Performance. Frage dich: wiederholbar?` })
+      push('warn', 'ci.narrow_edge.title', 'ci.narrow_edge.body', { n: pareto.topNCovers80, total: trades.length, pct: (concentration * 100).toFixed(0) })
     } else if (concentration > 0.3) {
-      insights.push({ severity: 'good', title: 'Breite Edge', message: `${pareto.topNCovers80} von ${trades.length} Trades tragen den Gewinn — keine extreme Abhängigkeit von Einzel-Treffern. Deine Edge ist robust verteilt.` })
+      push('good', 'ci.broad_edge.title', 'ci.broad_edge.body', { n: pareto.topNCovers80, total: trades.length })
     }
   }
 
-  // ── Streak / Sequenz-Bias (Tilt) ──
+  // ── Sequenz-Bias (Tilt) ──
   if (sequence?.afterWin && sequence?.afterLoss && sequence.afterLoss.count >= 5 && sequence.afterWin.count >= 5) {
     const wrDiff = sequence.afterWin.winRate - sequence.afterLoss.winRate
     if (sequence.afterLoss.winRate < sequence.afterWin.winRate - 15) {
-      insights.push({ severity: 'bad', title: 'Tilt nach Verlusten', message: `Nach einem Verlust fällt deine Win-Rate von ${sequence.afterWin.winRate.toFixed(0)}% auf ${sequence.afterLoss.winRate.toFixed(0)}% (${wrDiff.toFixed(0)} Punkte Differenz). Klassischer Revenge-Trading-Indikator. Erzwinge eine Pause nach 2 Verlusten in Folge.` })
+      push('bad', 'ci.tilt.title', 'ci.tilt.body', {
+        win:  sequence.afterWin.winRate.toFixed(0),
+        loss: sequence.afterLoss.winRate.toFixed(0),
+        diff: wrDiff.toFixed(0),
+      })
     } else if (Math.abs(wrDiff) < 5) {
-      insights.push({ severity: 'good', title: 'Emotionale Stabilität', message: `Deine Win-Rate nach Verlusten (${sequence.afterLoss.winRate.toFixed(0)}%) ist fast gleich wie nach Gewinnen (${sequence.afterWin.winRate.toFixed(0)}%). Du tradest unabhängig vom vorherigen Ergebnis — das ist diszipliniertes Trading.` })
+      push('good', 'ci.steady.title', 'ci.steady.body', {
+        loss: sequence.afterLoss.winRate.toFixed(0),
+        win:  sequence.afterWin.winRate.toFixed(0),
+      })
     }
   }
 
@@ -1405,43 +1422,43 @@ export function buildCoachInsights(trades, { stats, pareto, streak, mfeMae, sequ
   if (mfeMae?.overallCapture != null && mfeMae.sampleSize >= 10) {
     const cap = mfeMae.overallCapture
     if (cap < 0.4) {
-      insights.push({ severity: 'warn', title: 'Niedrige Gewinn-Capture', message: `Du nimmst im Schnitt nur ${(cap * 100).toFixed(0)}% des verfügbaren Peak-Gewinns mit. Deine Trades laufen weiter als du sie hältst — entweder Take-Profit zu eng oder du steigst aus Angst zu früh aus.` })
+      push('warn', 'ci.low_capture.title', 'ci.low_capture.body', { pct: (cap * 100).toFixed(0) })
     } else if (cap >= 0.7) {
-      insights.push({ severity: 'good', title: 'Starke Gewinn-Capture', message: `${(cap * 100).toFixed(0)}% Capture — du holst fast den ganzen Peak-Gewinn raus, ohne zu gierig zu werden. Sauberes Trade-Management.` })
+      push('good', 'ci.high_capture.title', 'ci.high_capture.body', { pct: (cap * 100).toFixed(0) })
     }
   }
 
   // ── Consistency ──
   if (consistency?.cv != null && consistency.monthCount >= 3) {
     if (consistency.cv > 2) {
-      insights.push({ severity: 'tip', title: 'Schwankende Monate', message: `Hoher Variations-Koeffizient (${consistency.cv.toFixed(2)}) — deine Monatsergebnisse schwanken stark. Ein Lottogewinn-Monat zwischen flachen oder roten ist riskanter, als es der Gesamt-P&L wirken lässt.` })
+      push('tip', 'ci.volatile_months.title', 'ci.volatile_months.body', { cv: consistency.cv.toFixed(2) })
     } else if (consistency.cv < 1 && consistency.cv > 0 && consistency.positiveMonths > consistency.negativeMonths) {
-      insights.push({ severity: 'good', title: 'Konsistente Returns', message: `CV ${consistency.cv.toFixed(2)} bei ${consistency.positiveMonths} grünen Monaten — du lieferst gleichmäßig, nicht in Wellen. Das ist Prop-Firm-tauglich.` })
+      push('good', 'ci.consistent_returns.title', 'ci.consistent_returns.body', { cv: consistency.cv.toFixed(2), greens: consistency.positiveMonths })
     }
   }
 
   // ── Recovery Factor ──
   if (recovery?.recoveryFactor != null && stats?.totalTrades >= 20) {
     if (recovery.recoveryFactor < 1) {
-      insights.push({ severity: 'bad', title: 'Schmerz größer als Gewinn', message: `Recovery-Factor ${recovery.recoveryFactor.toFixed(2)} — dein Max-Drawdown war größer als dein Gesamt-Gewinn. Du musstest mehr riskieren, als du verdient hast.` })
+      push('bad', 'ci.low_recovery.title', 'ci.low_recovery.body', { rf: recovery.recoveryFactor.toFixed(2) })
     } else if (recovery.recoveryFactor >= 5) {
-      insights.push({ severity: 'good', title: 'Hohe Schmerz-Effizienz', message: `Recovery-Factor ${recovery.recoveryFactor.toFixed(1)} — du verdienst >5x das, was du im tiefsten Drawdown im Loch warst. Sehr robuste Kurve.` })
+      push('good', 'ci.high_recovery.title', 'ci.high_recovery.body', { rf: recovery.recoveryFactor.toFixed(1) })
     }
   }
 
   // ── Risk of Ruin ──
   if (ror?.ror != null && ror.ror > 0.1) {
-    insights.push({ severity: 'bad', title: 'Risiko zu hoch', message: `Risk-of-Ruin liegt bei ${(ror.ror * 100).toFixed(1)}%. Bei deiner aktuellen WR/R-Ratio und Risiko-Größe ist das nicht spekulativ — das wird passieren. Reduziere Risiko pro Trade auf <1%.` })
+    push('bad', 'ci.high_ror.title', 'ci.high_ror.body', { pct: (ror.ror * 100).toFixed(1) })
   }
 
-  // ── Streak — sehr lange Verlierer-Phasen ──
+  // ── Lange Verlierer-Serie ──
   if (streak?.maxLoss != null && streak.maxLoss >= 7) {
-    insights.push({ severity: 'tip', title: 'Lange Verlierer-Serie', message: `Längste Verlust-Serie: ${streak.maxLoss} Trades. Stelle sicher, dass deine Positionsgröße sowas ohne Panik überlebt — bei 2% Risiko = ~13% Drawdown ohne Compound-Effekt.` })
+    push('tip', 'ci.long_streak.title', 'ci.long_streak.body', { n: streak.maxLoss })
   }
 
-  // ── Fallback: wenn nichts auffällt ──
+  // ── Fallback ──
   if (insights.length === 0 && trades.length >= 10) {
-    insights.push({ severity: 'tip', title: 'Solides Mittelfeld', message: 'Keine Extremwerte auf den ersten Blick. Schau dir die einzelnen Karten unten an — der Teufel steckt im Detail (Heatmap-Zeiten, Tag-Kombinationen, Hold-Time-Verteilung).' })
+    push('tip', 'ci.fallback.title', 'ci.fallback.body')
   }
 
   return insights

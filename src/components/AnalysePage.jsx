@@ -1783,32 +1783,34 @@ function ConsistencyCard({ trades }) {
  * SIZING-KONSISTENZ — Riskiere ich nach Verlusten mehr?
  * ============================================================ */
 const SIZING_BUCKET_META = {
-  opening:      { label: 'Eröffnungs-Trade', color: '#3b82f6', tip: 'Erster Trade des Tages' },
-  afterWin:     { label: 'Nach Gewinn',      color: '#10b981', tip: 'Direkt nach einem grünen Trade' },
-  afterLoss:    { label: 'Nach Verlust',     color: '#f59e0b', tip: 'Direkt nach einem roten Trade' },
-  after2Loss:   { label: 'Nach 2+ Verlusten', color: '#ef4444', tip: 'Nach 2 oder mehr Verlierern in Folge' },
-  afterBigLoss: { label: 'Nach großem Verlust', color: '#ec4899', tip: 'Nach Verlust >1.5× durchschnittlicher Verlust' },
+  opening:      { labelKey: 'sc.bucket.opening',      color: '#3b82f6' },
+  afterWin:     { labelKey: 'sc.bucket.afterWin',     color: '#10b981' },
+  afterLoss:    { labelKey: 'sc.bucket.afterLoss',    color: '#f59e0b' },
+  after2Loss:   { labelKey: 'sc.bucket.after2Loss',   color: '#ef4444' },
+  afterBigLoss: { labelKey: 'sc.bucket.afterBigLoss', color: '#ec4899' },
 }
 
 function SizingConsistencyCard({ trades }) {
+  const { t } = useLanguage()
   const data = useMemo(() => buildSizingConsistency(trades), [trades])
   if (!data) return null
 
+  const dev = data.maxDeviation.toFixed(0)
   const verdict = data.maxDeviation > 25
-    ? { color: '#ef4444', label: 'Stark inkonsistent', msg: `Bis zu ${data.maxDeviation.toFixed(0)}% Abweichung — du sizierst je nach Stimmung deutlich anders. Klassisches Tilt-/Übermut-Symptom.` }
+    ? { color: '#ef4444', label: t('sc.verdict.bad.title'),  msg: t('sc.verdict.bad.body',  { dev }) }
     : data.maxDeviation > 10
-      ? { color: '#f59e0b', label: 'Leicht inkonsistent', msg: `${data.maxDeviation.toFixed(0)}% Abweichung. Noch okay, aber im Auge behalten — Sizing sollte aus dem Plan kommen, nicht aus dem letzten Trade.` }
-      : { color: '#10b981', label: 'Konsistent', msg: `Nur ${data.maxDeviation.toFixed(0)}% Abweichung zwischen den Buckets. Du sizierst diszipliniert unabhängig von Vorgängern.` }
+      ? { color: '#f59e0b', label: t('sc.verdict.warn.title'), msg: t('sc.verdict.warn.body', { dev }) }
+      : { color: '#10b981', label: t('sc.verdict.good.title'), msg: t('sc.verdict.good.body', { dev }) }
 
   return (
     <div className="card">
       <div className="card-header">
         <SectionTitle
           icon={Scaling}
-          title="Sizing-Konsistenz"
-          subtitle={`Ø Position: ${data.overallAvgVolume.toFixed(2)} Lot · maximale Abweichung: ${data.maxDeviation.toFixed(0)}%`}
+          title={t('sc.title')}
+          subtitle={t('sc.subtitle', { avg: data.overallAvgVolume.toFixed(2), dev })}
           color="#ec4899"
-          info="Vergleicht deine durchschnittliche Position-Größe (Lot-Volumen) je nach Vor-Trade-Situation. Statistisch dürftest du immer gleich viel riskieren — wenn du nach Verlusten plötzlich größer oder kleiner sizierst, ist das emotionsgetrieben und untergräbt deine Edge. Größter Hebel: Sizing-Drift erklärt oft die schmerzhaftesten Drawdowns."
+          info={t('sc.info')}
         />
       </div>
       <div className="p-4 space-y-4">
@@ -1833,11 +1835,11 @@ function SizingConsistencyCard({ trades }) {
               <div key={b.id} className="rounded-lg border border-[#1f2937] bg-[#0d1117] p-3">
                 <div className="flex items-center justify-between mb-1.5">
                   <div className="flex items-center gap-2 min-w-0">
-                    <span className="text-[12px] font-semibold" style={{ color: meta.color }}>{meta.label}</span>
-                    <span className="text-[10px] text-slate-500">{b.count} Trade{b.count !== 1 ? 's' : ''}</span>
+                    <span className="text-[12px] font-semibold" style={{ color: meta.color }}>{t(meta.labelKey)}</span>
+                    <span className="text-[10px] text-slate-500">{t('sc.trades_count', { n: b.count, plural: b.count !== 1 ? 's' : '' })}</span>
                   </div>
                   <div className="flex items-center gap-3 shrink-0">
-                    <span className="font-mono text-[12px] text-slate-300">{b.avgVolume.toFixed(2)} Lot</span>
+                    <span className="font-mono text-[12px] text-slate-300">{t('sc.lot_unit', { n: b.avgVolume.toFixed(2) })}</span>
                     {b.count >= 3 && (
                       <span className="font-mono text-[11px] font-semibold" style={{ color: devColor }}>
                         {b.deviationPct >= 0 ? '+' : ''}{b.deviationPct.toFixed(0)}%
@@ -1847,11 +1849,10 @@ function SizingConsistencyCard({ trades }) {
                 </div>
                 <div className="h-2 bg-[#1f2937] rounded-full overflow-hidden relative">
                   <div className="h-full rounded-full" style={{ width: `${widthPct}%`, backgroundColor: meta.color, opacity: 0.7 }} />
-                  {/* Mittel-Linie als Referenz bei 50% */}
-                  <div className="absolute top-0 bottom-0 w-px bg-slate-500" style={{ left: '50%' }} title="Ø über alle Trades" />
+                  <div className="absolute top-0 bottom-0 w-px bg-slate-500" style={{ left: '50%' }} />
                 </div>
                 <div className="flex justify-between mt-1 text-[10px] text-slate-600">
-                  <span>WR {b.winRate.toFixed(0)}%</span>
+                  <span>{t('sc.wr')} {b.winRate.toFixed(0)}%</span>
                   <span className={b.pnl >= 0 ? 'text-[#10b981]' : 'text-[#ef4444]'}>
                     {b.pnl >= 0 ? '+' : ''}${b.pnl.toFixed(0)}
                   </span>
@@ -1860,9 +1861,7 @@ function SizingConsistencyCard({ trades }) {
             )
           })}
         </div>
-        <p className="text-[11px] text-slate-500">
-          Senkrechter Strich = Durchschnitt aller Trades. Balken-Position zeigt Abweichung. Rot ab ±25%, Gelb ab ±10%.
-        </p>
+        <p className="text-[11px] text-slate-500">{t('sc.legend')}</p>
       </div>
     </div>
   )
@@ -1872,24 +1871,28 @@ function SizingConsistencyCard({ trades }) {
  * KONKURRIERENDE POSITIONEN — Korrelations-Cluster
  * ============================================================ */
 function ConcurrentPositionsCard({ trades }) {
+  const { t } = useLanguage()
   const data = useMemo(() => buildConcurrentPositions(trades), [trades])
   if (!data) return null
 
+  const avg  = data.avgConcurrent.toFixed(1)
+  const max  = data.maxConcurrent
+  const solo = data.soloTradesPct.toFixed(0)
   const verdict = data.avgConcurrent < 0.5
-    ? { color: '#10b981', label: 'Sauber sequenziell', msg: `Im Schnitt nur ${data.avgConcurrent.toFixed(1)} weitere Position offen. ${data.soloTradesPct.toFixed(0)}% deiner Trades sind solo — sauberes, fokussiertes Trading ohne Cluster-Risiko.` }
+    ? { color: '#10b981', label: t('cp.verdict.good.title'), msg: t('cp.verdict.good.body', { avg, solo }) }
     : data.avgConcurrent < 2
-      ? { color: '#f59e0b', label: 'Moderate Überschneidung', msg: `Ø ${data.avgConcurrent.toFixed(1)} weitere Positionen offen, max. ${data.maxConcurrent}. Achte darauf, ob die Symbole korreliert sind — sonst multiplizierst du dein Risiko unbemerkt.` }
-      : { color: '#ef4444', label: 'Hohe Konzentration', msg: `Ø ${data.avgConcurrent.toFixed(1)} weitere Positionen — du hältst oft viel gleichzeitig. Wenn die Symbole korrelieren, hast du de facto 1 Trade mit ${data.maxConcurrent}× Risiko. Sehr unterschätzte Drawdown-Quelle.` }
+      ? { color: '#f59e0b', label: t('cp.verdict.warn.title'), msg: t('cp.verdict.warn.body', { avg, max }) }
+      : { color: '#ef4444', label: t('cp.verdict.bad.title'),  msg: t('cp.verdict.bad.body',  { avg, max }) }
 
   return (
     <div className="card">
       <div className="card-header">
         <SectionTitle
           icon={Link2}
-          title="Konkurrierende Positionen"
-          subtitle={`Ø ${data.avgConcurrent.toFixed(1)} parallel offen · max. ${data.maxConcurrent} · ${data.soloTradesPct.toFixed(0)}% Solo-Trades`}
+          title={t('cp.title')}
+          subtitle={t('cp.subtitle', { avg, max, solo })}
           color="#06b6d4"
-          info="Misst, wie viele andere Positionen typischerweise gleichzeitig offen sind, wenn du einen neuen Trade öffnest. Wenn du 3 USD-Pairs gleichzeitig long bist, hast du eigentlich einen einzigen 'Dollar-Schwäche'-Trade mit 3× Risiko. Die Symbol-Paare unten zeigen, welche Kombinationen am häufigsten gleichzeitig laufen — Korrelations-Check empfohlen."
+          info={t('cp.info')}
         />
       </div>
       <div className="p-4 space-y-4">
@@ -1904,7 +1907,7 @@ function ConcurrentPositionsCard({ trades }) {
         {data.topPairs.length > 0 ? (
           <div>
             <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium mb-2">
-              Häufigste Symbol-Paare (gleichzeitig offen)
+              {t('cp.top_pairs')}
             </p>
             <div className="space-y-1.5">
               {data.topPairs.map((p, i) => (
@@ -1915,18 +1918,16 @@ function ConcurrentPositionsCard({ trades }) {
                     <span className="font-mono text-[12px] text-slate-200">{p.symbolB}</span>
                   </div>
                   <div className="flex items-center gap-3 text-[11px] text-slate-500 shrink-0">
-                    <span><span className="font-mono text-slate-300">{p.count}</span>× überlappt</span>
-                    <span><span className="font-mono text-slate-300">{p.overlapHours.toFixed(1)}h</span> gemeinsam</span>
+                    <span>{t('cp.overlap_times', { count: p.count })}</span>
+                    <span>{t('cp.overlap_hours', { hours: p.overlapHours.toFixed(1) })}</span>
                   </div>
                 </div>
               ))}
             </div>
-            <p className="text-[11px] text-slate-500 mt-3">
-              Tipp: Prüfe bei Top-Paaren die Korrelation (z.B. EURUSD/GBPUSD = ~0.85). Hohe positive Korrelation = effektive Risiko-Verdopplung.
-            </p>
+            <p className="text-[11px] text-slate-500 mt-3">{t('cp.tip')}</p>
           </div>
         ) : (
-          <p className="text-[12px] text-slate-500">Keine zeitlich überlappenden Trades — du tradest streng sequenziell.</p>
+          <p className="text-[12px] text-slate-500">{t('cp.no_overlap')}</p>
         )}
       </div>
     </div>
@@ -1937,26 +1938,31 @@ function ConcurrentPositionsCard({ trades }) {
  * TRADING-FREQUENZ-TREND — Overtrading-Erkennung
  * ============================================================ */
 function TradingFrequencyCard({ trades }) {
+  const { t } = useLanguage()
   const data = useMemo(() => buildTradingFrequency(trades), [trades])
   if (!data || !data.rows.length) return null
 
+  const freq    = Math.abs(data.freqTrendPct).toFixed(0)
+  const wr      = Math.abs(data.wrTrendPct).toFixed(1)
+  const wr_sign = data.wrTrendPct >= 0 ? '+' : '-'
+
   const verdict = data.overtradingFlag
-    ? { color: '#ef4444', label: 'Overtrading-Warnung', msg: `Deine Trade-Frequenz ist um ${data.freqTrendPct.toFixed(0)}% gestiegen, gleichzeitig fiel die Win-Rate um ${Math.abs(data.wrTrendPct).toFixed(1)} Punkte. Klassisches Muster: mehr Trades, schlechtere Qualität.` }
+    ? { color: '#ef4444', label: t('tf.verdict.overtrading.title'), msg: t('tf.verdict.overtrading.body', { freq, wr }) }
     : data.freqTrendPct > 15
-      ? { color: '#f59e0b', label: 'Frequenz steigt', msg: `${data.freqTrendPct.toFixed(0)}% mehr Trades pro Tag — Win-Rate hält noch (${data.wrTrendPct >= 0 ? '+' : ''}${data.wrTrendPct.toFixed(1)} Pt). Wachsam bleiben, dass Quantität nicht Qualität ersetzt.` }
+      ? { color: '#f59e0b', label: t('tf.verdict.rising.title'),  msg: t('tf.verdict.rising.body',  { freq, wr, wr_sign }) }
       : data.freqTrendPct < -15
-        ? { color: '#3b82f6', label: 'Frequenz sinkt', msg: `${Math.abs(data.freqTrendPct).toFixed(0)}% weniger Trades. Selektiver geworden oder Phase mit weniger Setups — Win-Rate-Veränderung: ${data.wrTrendPct >= 0 ? '+' : ''}${data.wrTrendPct.toFixed(1)} Pt.` }
-        : { color: '#10b981', label: 'Stabile Frequenz', msg: `Trade-Anzahl konstant (±${Math.abs(data.freqTrendPct).toFixed(0)}%). Solide Routine — Disziplin ist sichtbar.` }
+        ? { color: '#3b82f6', label: t('tf.verdict.falling.title'), msg: t('tf.verdict.falling.body', { freq, wr, wr_sign }) }
+        : { color: '#10b981', label: t('tf.verdict.stable.title'),  msg: t('tf.verdict.stable.body',  { freq }) }
 
   return (
     <div className="card">
       <div className="card-header">
         <SectionTitle
           icon={Zap}
-          title="Trading-Frequenz-Trend"
-          subtitle={`Ø ${data.avgTradesPerDay.toFixed(1)} Trades pro Tag · ${data.rows.length} Trading-Tage`}
+          title={t('tf.title')}
+          subtitle={t('tf.subtitle', { avg: data.avgTradesPerDay.toFixed(1), days: data.rows.length })}
           color="#f97316"
-          info="Anzahl Trades pro Tag mit 7-Tage-Rolling-Average und gleichzeitiger Win-Rate. Klassisches Overtrading-Muster: Frequenz steigt + Win-Rate fällt → du gönnst dir nicht mehr nur die A-Setups, sondern hängst auch B- und C-Setups dran. Frühindikator für Tilt oder Boredom-Trading."
+          info={t('tf.info')}
         />
       </div>
       <div className="p-4 space-y-3">
@@ -1972,18 +1978,18 @@ function TradingFrequencyCard({ trades }) {
 
         <div className="grid grid-cols-2 gap-2 text-[11px]">
           <div className="rounded-lg border border-[#1f2937] bg-[#0d1117] p-2.5">
-            <p className="text-slate-500 uppercase tracking-wide text-[10px] font-medium mb-1">Erste Hälfte</p>
+            <p className="text-slate-500 uppercase tracking-wide text-[10px] font-medium mb-1">{t('tf.first_half')}</p>
             <div className="flex items-baseline gap-2">
               <span className="font-mono text-sm font-semibold text-slate-200">{data.firstHalfFreq.toFixed(1)}</span>
-              <span className="text-slate-500 text-[10px]">Trades/Tag</span>
+              <span className="text-slate-500 text-[10px]">{t('tf.trades_per_day')}</span>
             </div>
             <p className="text-slate-500 mt-1">WR: <span className="font-mono text-slate-300">{data.firstHalfWR.toFixed(0)}%</span></p>
           </div>
           <div className="rounded-lg border border-[#1f2937] bg-[#0d1117] p-2.5">
-            <p className="text-slate-500 uppercase tracking-wide text-[10px] font-medium mb-1">Zweite Hälfte</p>
+            <p className="text-slate-500 uppercase tracking-wide text-[10px] font-medium mb-1">{t('tf.second_half')}</p>
             <div className="flex items-baseline gap-2">
               <span className="font-mono text-sm font-semibold text-slate-200">{data.secondHalfFreq.toFixed(1)}</span>
-              <span className="text-slate-500 text-[10px]">Trades/Tag</span>
+              <span className="text-slate-500 text-[10px]">{t('tf.trades_per_day')}</span>
             </div>
             <p className="text-slate-500 mt-1">WR: <span className="font-mono text-slate-300">{data.secondHalfWR.toFixed(0)}%</span></p>
           </div>
@@ -2020,9 +2026,7 @@ function TradingFrequencyCard({ trades }) {
             <Line yAxisId="right" type="monotone" dataKey="rollingWinRate" stroke="#3b82f6" strokeWidth={2} dot={false} strokeDasharray="4 4" />
           </ComposedChart>
         </ResponsiveContainer>
-        <p className="text-[11px] text-slate-500">
-          Orange = Trades/Tag (Balken + 7-Tage-Linie) · Blau gestrichelt = 7-Tage-Win-Rate (rechte Achse). Wenn Orange steigt UND Blau fällt: Overtrading-Verdacht.
-        </p>
+        <p className="text-[11px] text-slate-500">{t('tf.legend')}</p>
       </div>
     </div>
   )
@@ -2032,12 +2036,13 @@ function TradingFrequencyCard({ trades }) {
  * HOLD-DURATION TREND — Ø Haltedauer pro Tag
  * ============================================================ */
 const HOLD_RANGES = [
-  { id: 'month', label: 'Monat', days: 30 },
-  { id: 'year',  label: 'Jahr',  days: 365 },
-  { id: 'all',   label: 'Gesamt', days: null },
+  { id: 'month', labelKey: 'hd.range.month', days: 30 },
+  { id: 'year',  labelKey: 'hd.range.year',  days: 365 },
+  { id: 'all',   labelKey: 'hd.range.all',   days: null },
 ]
 
 function HoldRangeToggle({ range, setRange }) {
+  const { t } = useLanguage()
   return (
     <div className="flex items-center gap-0.5 bg-[#0d1117] border border-[#1f2937] rounded-lg p-0.5">
       {HOLD_RANGES.map(r => (
@@ -2049,7 +2054,7 @@ function HoldRangeToggle({ range, setRange }) {
               ? 'bg-[#06b6d4]/15 text-[#06b6d4] border border-[#06b6d4]/30'
               : 'text-slate-500 hover:text-slate-300'}`}
         >
-          {r.label}
+          {t(r.labelKey)}
         </button>
       ))}
     </div>
@@ -2057,6 +2062,7 @@ function HoldRangeToggle({ range, setRange }) {
 }
 
 function HoldDurationTrendCard({ trades }) {
+  const { t } = useLanguage()
   const [range, setRange] = useState('all')
 
   const filteredTrades = useMemo(() => {
@@ -2073,14 +2079,14 @@ function HoldDurationTrendCard({ trades }) {
         <div className="card-header">
           <SectionTitle
             icon={Clock}
-            title="Ø Haltedauer pro Tag"
-            subtitle="Keine Trades im gewählten Zeitraum"
+            title={t('hd.title')}
+            subtitle={t('hd.empty_subtitle')}
             color="#06b6d4"
           />
         </div>
         <div className="p-4 flex items-center justify-between">
           <HoldRangeToggle range={range} setRange={setRange} />
-          <p className="text-xs text-slate-500">Wähle einen anderen Zeitraum.</p>
+          <p className="text-xs text-slate-500">{t('hd.empty_hint')}</p>
         </div>
       </div>
     )
@@ -2089,29 +2095,26 @@ function HoldDurationTrendCard({ trades }) {
   const trendUp     = data.trendPct > 5
   const trendDown   = data.trendPct < -5
   const trendColor  = trendUp ? '#f59e0b' : trendDown ? '#3b82f6' : '#10b981'
-  const trendLabel  = trendUp
-    ? `Haltedauer ist um ${Math.abs(data.trendPct).toFixed(0)}% gestiegen — du hältst länger als früher.`
-    : trendDown
-      ? `Haltedauer ist um ${Math.abs(data.trendPct).toFixed(0)}% gesunken — du gehst schneller raus.`
-      : `Haltedauer ist konstant geblieben (±${Math.abs(data.trendPct).toFixed(0)}%).`
+  const trendKey    = trendUp ? 'hd.trend.up' : trendDown ? 'hd.trend.down' : 'hd.trend.stable'
+  const trendLabel  = t(trendKey, { pct: Math.abs(data.trendPct).toFixed(0) })
 
   return (
     <div className="card">
       <div className="card-header">
         <SectionTitle
           icon={Clock}
-          title="Ø Haltedauer pro Tag"
-          subtitle={`${data.rows.length} Trading-Tage · Schnitt insgesamt: ${formatDuration(data.overallAvg)}`}
+          title={t('hd.title')}
+          subtitle={t('hd.subtitle', { days: data.rows.length, avg: formatDuration(data.overallAvg) })}
           color="#06b6d4"
-          info="Durchschnittliche Haltedauer aller Trades pro Trading-Tag, plus 7-Tage-Rolling-Average (geglättete Linie) zur Trend-Erkennung. Hilft zu sehen, ob du im Laufe der Zeit deine Trades länger laufen lässt (mehr Geduld) oder immer schneller raus gehst (Angst/Ungeduld) — beides ist verhaltens-relevant für deine Edge."
+          info={t('hd.info')}
         />
       </div>
       <div className="p-4 space-y-3">
         {/* Zeit-Filter */}
         <div className="flex items-center gap-2">
-          <span className="text-[11px] text-slate-500">Zeitraum:</span>
+          <span className="text-[11px] text-slate-500">{t('hd.range_label')}</span>
           <HoldRangeToggle range={range} setRange={setRange} />
-          <span className="text-[11px] text-slate-600 ml-auto">{filteredTrades.length} Trades</span>
+          <span className="text-[11px] text-slate-600 ml-auto">{t('hd.trades_count', { n: filteredTrades.length })}</span>
         </div>
 
         {/* Trend-Statement */}
@@ -2120,10 +2123,10 @@ function HoldDurationTrendCard({ trades }) {
           style={{ backgroundColor: trendColor + '15', borderColor: trendColor + '40' }}
         >
           <div className="flex items-center gap-3 min-w-0">
-            <div className="text-[11px] text-slate-500 uppercase tracking-wider font-medium">Erste Hälfte</div>
+            <div className="text-[11px] text-slate-500 uppercase tracking-wider font-medium">{t('hd.first_half')}</div>
             <div className="font-mono text-sm font-semibold text-slate-200">{formatDuration(data.firstHalfAvg)}</div>
             <div className="text-slate-600">→</div>
-            <div className="text-[11px] text-slate-500 uppercase tracking-wider font-medium">Zweite Hälfte</div>
+            <div className="text-[11px] text-slate-500 uppercase tracking-wider font-medium">{t('hd.second_half')}</div>
             <div className="font-mono text-sm font-semibold text-slate-200">{formatDuration(data.secondHalfAvg)}</div>
           </div>
           <div className="font-mono text-sm font-bold shrink-0" style={{ color: trendColor }}>
@@ -2158,21 +2161,19 @@ function HoldDurationTrendCard({ trades }) {
                 return (
                   <div className="bg-[#1a2233] border border-[#374151] rounded-lg px-3 py-2 text-xs">
                     <p className="text-slate-300 font-semibold">{label}</p>
-                    <p className="text-[#06b6d4] font-mono">Tag-Ø: {formatDuration(day.avgMinutes)}</p>
-                    <p className="text-[#f59e0b] font-mono">7-Tage-Ø: {formatDuration(day.rolling7)}</p>
-                    <p className="text-slate-500 text-[11px] mt-1">{day.count} Trade{day.count !== 1 ? 's' : ''}</p>
+                    <p className="text-[#06b6d4] font-mono">{t('hd.tooltip.day', { value: formatDuration(day.avgMinutes) })}</p>
+                    <p className="text-[#f59e0b] font-mono">{t('hd.tooltip.rolling', { value: formatDuration(day.rolling7) })}</p>
+                    <p className="text-slate-500 text-[11px] mt-1">{day.count} {day.count === 1 ? t('common.trade') : t('common.trades')}</p>
                   </div>
                 )
               }}
             />
-            <ReferenceLine y={data.overallAvg} stroke="#475569" strokeDasharray="4 4" label={{ value: 'Gesamt-Ø', fill: '#64748b', fontSize: 10, position: 'right' }} />
+            <ReferenceLine y={data.overallAvg} stroke="#475569" strokeDasharray="4 4" />
             <Bar dataKey="avgMinutes" fill="#06b6d4" fillOpacity={0.35} radius={[3, 3, 0, 0]} />
             <Line type="monotone" dataKey="rolling7" stroke="#f59e0b" strokeWidth={2} dot={false} />
           </ComposedChart>
         </ResponsiveContainer>
-        <p className="text-[11px] text-slate-500">
-          Türkise Balken = Tages-Durchschnitt · Orange Linie = 7-Tage-Rolling-Average (geglättet) · Graue Linie = Gesamt-Schnitt aller Trades.
-        </p>
+        <p className="text-[11px] text-slate-500">{t('hd.legend')}</p>
       </div>
     </div>
   )
@@ -2182,38 +2183,42 @@ function HoldDurationTrendCard({ trades }) {
  * AI COACH — Aggregierte Insights
  * ============================================================ */
 const SEVERITY_STYLE = {
-  good: { color: '#10b981', bg: '#10b98115', border: '#10b98140', label: 'Stark' },
-  warn: { color: '#f59e0b', bg: '#f59e0b15', border: '#f59e0b40', label: 'Achtung' },
-  bad:  { color: '#ef4444', bg: '#ef444415', border: '#ef444440', label: 'Risiko' },
-  tip:  { color: '#3b82f6', bg: '#3b82f615', border: '#3b82f640', label: 'Hinweis' },
+  good: { color: '#10b981', bg: '#10b98115', border: '#10b98140', labelKey: 'coach.severity.good' },
+  warn: { color: '#f59e0b', bg: '#f59e0b15', border: '#f59e0b40', labelKey: 'coach.severity.warn' },
+  bad:  { color: '#ef4444', bg: '#ef444415', border: '#ef444440', labelKey: 'coach.severity.bad' },
+  tip:  { color: '#3b82f6', bg: '#3b82f615', border: '#3b82f640', labelKey: 'coach.severity.tip' },
 }
 
-function buildCoachNarrative(insights, totalTrades) {
+function buildCoachNarrative(insights, totalTrades, t) {
   if (!insights.length) return null
   const good = insights.filter(i => i.severity === 'good')
   const bad  = insights.filter(i => i.severity === 'bad' || i.severity === 'warn')
   const tips = insights.filter(i => i.severity === 'tip')
 
-  const intro = `Ich habe deine ${totalTrades} abgeschlossenen Trades durch alle Analyse-Module geschickt. Hier mein Eindruck:`
+  const resolveMsg = (ins) => t(ins.messageKey, ins.vars)
+  const resolveTitle = (ins) => t(ins.titleKey).toLowerCase()
 
-  let positive = ''
+  const intro = t('coach.intro', { count: totalTrades })
+
+  let positive
   if (good.length) {
-    const headlines = good.map(g => g.title.toLowerCase()).join(', ')
-    positive = `**Was du richtig machst:** ${good.map(g => g.message).join(' ')} Insgesamt ${good.length === 1 ? 'ein klarer Lichtblick' : good.length + ' Lichtblicke'} — bleib bei diesen Mustern (${headlines}).`
+    const headlines = good.map(resolveTitle).join(', ')
+    const closeKey  = good.length === 1 ? 'coach.positive_close.single' : 'coach.positive_close.multi'
+    positive = `${t('coach.positive_lead')} ${good.map(resolveMsg).join(' ')} ${t(closeKey, { n: good.length, headlines })}`
   } else {
-    positive = `**Was du richtig machst:** Auf den großen Kennzahlen ragt aktuell nichts heraus — das ist kein Drama, aber auch kein Polster. Konzentriere dich darauf, mindestens eine Stärke auszubauen, bevor du an mehreren Hebeln gleichzeitig schraubst.`
+    positive = t('coach.positive_none')
   }
 
-  let critical = ''
+  let critical
   if (bad.length) {
-    critical = `**Was dich aktuell Geld kostet:** ${bad.map(b => b.message).join(' ')} Wenn du diese Woche an einer Sache arbeiten würdest, dann an der ersten Position oben — dort steckt der größte Hebel.`
+    critical = `${t('coach.critical_lead')} ${bad.map(resolveMsg).join(' ')} ${t('coach.critical_close')}`
   } else {
-    critical = `**Was dich aktuell Geld kostet:** Keine roten Flaggen auf den Hauptmetriken. Achtung: das ist eine Momentaufnahme — kleine Stichproben können Risiken kaschieren. Bleib bei striktem Risk-Management.`
+    critical = t('coach.critical_none')
   }
 
   let outlook = ''
   if (tips.length) {
-    outlook = `**Zum Weiterdenken:** ${tips.map(t => t.message).join(' ')}`
+    outlook = `${t('coach.outlook_lead')} ${tips.map(resolveMsg).join(' ')}`
   }
 
   return [intro, positive, critical, outlook].filter(Boolean).join('\n\n')
@@ -2237,6 +2242,8 @@ function renderNarrative(text) {
 }
 
 function CoachCard({ trades, accountBalance, mfeArchive }) {
+  const { t } = useLanguage()
+
   const insights = useMemo(() => {
     const stats = calcStats(trades)
     const pareto = buildParetoContribution(trades)
@@ -2253,7 +2260,7 @@ function CoachCard({ trades, accountBalance, mfeArchive }) {
     return buildCoachInsights(trades, { stats, pareto, streak, mfeMae, sequence, consistency, recovery, ror })
   }, [trades, accountBalance, mfeArchive])
 
-  const narrative = useMemo(() => buildCoachNarrative(insights, trades.length), [insights, trades.length])
+  const narrative = useMemo(() => buildCoachNarrative(insights, trades.length, t), [insights, trades.length, t])
 
   const counts = useMemo(() => {
     const c = { good: 0, warn: 0, bad: 0, tip: 0 }
@@ -2266,15 +2273,20 @@ function CoachCard({ trades, accountBalance, mfeArchive }) {
       <div className="card-header">
         <SectionTitle
           icon={Sparkles}
-          title="AI-Coach"
-          subtitle={`${insights.length} Insights · ${counts.good} stark · ${counts.warn + counts.bad} kritisch · ${counts.tip} Hinweise`}
+          title={t('coach.title')}
+          subtitle={t('coach.subtitle', {
+            count: insights.length,
+            good:  counts.good,
+            bad:   counts.warn + counts.bad,
+            tip:   counts.tip,
+          })}
           color="#8b5cf6"
-          info="Automatisch generierte Einschätzung deiner Performance über alle Metriken: was läuft gut, wo lauert Risiko, wo gibt es konkrete Verbesserungs-Hebel. Schwellwerte basieren auf etablierten Trading-Statistik-Standards (Profit-Faktor, R-Ratio, Recovery Factor, Risk of Ruin). Keine Glaskugel — datengetriebene Hypothesen, die du in deinem nächsten Trade-Plan prüfen kannst."
+          info={t('coach.info')}
         />
       </div>
       <div className="p-4 space-y-4">
         {insights.length === 0 ? (
-          <p className="text-sm text-slate-500">Zu wenige Trades für eine fundierte Einschätzung — mindestens 10 abgeschlossene Trades helfen.</p>
+          <p className="text-sm text-slate-500">{t('coach.no_data')}</p>
         ) : (
           <>
             {/* Narrative — der Coach erzählt */}
@@ -2286,24 +2298,26 @@ function CoachCard({ trades, accountBalance, mfeArchive }) {
 
             {/* Kernpunkte als kompakte Severity-Pills */}
             <div>
-              <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium mb-2">Kernpunkte</p>
+              <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium mb-2">{t('coach.core_points')}</p>
               <div className="flex flex-wrap gap-2">
                 {insights.map((ins, i) => {
                   const s = SEVERITY_STYLE[ins.severity] || SEVERITY_STYLE.tip
+                  const title = t(ins.titleKey)
+                  const message = t(ins.messageKey, ins.vars)
                   return (
                     <div
                       key={i}
                       className="inline-flex items-center gap-2 rounded-full pl-1 pr-3 py-1 border"
                       style={{ backgroundColor: s.bg, borderColor: s.border }}
-                      title={ins.message}
+                      title={message}
                     >
                       <span
                         className="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider"
                         style={{ backgroundColor: s.color, color: '#0d1117' }}
                       >
-                        {s.label}
+                        {t(s.labelKey)}
                       </span>
-                      <span className="text-[12px] font-medium" style={{ color: s.color }}>{ins.title}</span>
+                      <span className="text-[12px] font-medium" style={{ color: s.color }}>{title}</span>
                     </div>
                   )
                 })}
