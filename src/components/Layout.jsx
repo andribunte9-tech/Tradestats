@@ -78,9 +78,14 @@ function PrivacyToggle() {
               }`}
           >
             {usingLiveEquity ? <Wifi size={10} /> : <DollarSign size={10} />}
-            {accountBalance >= 1000
-              ? `${(accountBalance / 1000).toFixed(accountBalance % 1000 === 0 ? 0 : 1)}K`
-              : accountBalance.toFixed(0)}
+            {/* Im Privacy-Mode wird der Betrag versteckt (• • •) — Klick auf das Badge öffnet das
+                Popover und zeigt dort den vollen Wert; so muss man den Privacy-Toggle nicht
+                deaktivieren, um die Equity kurz zu prüfen. */}
+            {privacyMode
+              ? '• • •'
+              : accountBalance >= 1000
+                ? `${(accountBalance / 1000).toFixed(accountBalance % 1000 === 0 ? 0 : 1)}K`
+                : accountBalance.toFixed(0)}
           </button>
 
           {showBal && (

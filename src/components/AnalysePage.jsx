@@ -73,17 +73,18 @@ function Pill({ label, value, color, sub }) {
 /* ============================================================
  * 0. EQUITY FORECAST
  * ============================================================ */
+// Labels werden über t() übersetzt — die Konstante hält nur Keys
 const BASE_PERIODS = [
-  { id: 7,    label: '7 Tage' },
-  { id: 30,   label: '30 Tage' },
-  { id: 90,   label: '90 Tage' },
-  { id: null, label: 'Alles' },
+  { id: 7,    labelKey: 'fc.base.7d'  },
+  { id: 30,   labelKey: 'fc.base.30d' },
+  { id: 90,   labelKey: 'fc.base.90d' },
+  { id: null, labelKey: 'fc.base.all' },
 ]
 const FORECAST_HORIZONS = [
-  { id: 30,  label: '1 Monat' },
-  { id: 90,  label: '3 Monate' },
-  { id: 180, label: '6 Monate' },
-  { id: 365, label: '1 Jahr' },
+  { id: 30,  labelKey: 'fc.horizon.1m' },
+  { id: 90,  labelKey: 'fc.horizon.3m' },
+  { id: 180, labelKey: 'fc.horizon.6m' },
+  { id: 365, labelKey: 'fc.horizon.1y' },
 ]
 
 const TARGET_PCT_KEY = 'tradestats_forecast_target_pct'
@@ -155,9 +156,9 @@ function ForecastCard({ trades, accountBalance }) {
         <SectionTitle
           icon={Telescope}
           title={t('an.forecast')}
-          subtitle={`Wenn dein Schnitt der letzten ${BASE_PERIODS.find(p => p.id === basePeriod)?.label} so weiterläuft.`}
+          subtitle={t('ac.forecast.subtitle', { range: t(BASE_PERIODS.find(p => p.id === basePeriod)?.labelKey || '') })}
           color="#3b82f6"
-          info="Projiziert deine Equity-Kurve in die Zukunft, basierend auf dem durchschnittlichen Tages-P&L der gewählten Basis-Periode. Compound = Zinseszins (Risiko skaliert mit Kapital), Linear = fester Dollar-Betrag pro Tag. Keine Prophezeiung — nur eine Hochrechnung deiner aktuellen Performance."
+          info={t('ac.forecast.info')}
         />
         {usingLive && (
           <span className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full font-semibold
@@ -173,16 +174,22 @@ function ForecastCard({ trades, accountBalance }) {
           <div className="rounded-lg border border-[#f59e0b]/40 bg-[#f59e0b]/10 p-3 flex items-start gap-3">
             <AlertTriangle size={14} className="text-[#f59e0b] shrink-0 mt-0.5" />
             <div className="text-[12px] text-slate-300 leading-relaxed">
-              <span className="font-semibold text-[#f59e0b]">Prognose realistisch gekappt:</span>{' '}
-              Dein historischer Schnitt liegt bei <span className="font-mono text-white">{(data.rawMeanRate * 100).toFixed(2)}%</span> pro Trading-Tag (~<span className="font-mono text-white">{((Math.pow(1 + data.rawMeanRate, 5) - 1) * 100).toFixed(1)}%</span> pro Woche) — hochgerechnet wären das absurde ~{((Math.pow(1 + data.rawMeanRate, 252) - 1) * 100).toFixed(0)}% pro Jahr. Mit wachsendem Konto greifen aber Slippage, Position-Size-Limits und Markt-Impact. Die Prognose verwendet deshalb maximal{' '}
-              <span className="font-mono text-white">{(data.realisticWeeklyCap * 100).toFixed(0)}%</span> Wachstum pro Trading-Woche (entspricht ~{(data.realisticCap * 100).toFixed(2)}% pro Tag, ~{((Math.pow(1 + data.realisticCap, 252) - 1) * 100).toFixed(0)}% p.a.).
+              <span className="font-semibold text-[#f59e0b]">{t('fc.cap_lead')}</span>{' '}
+              {t('fc.cap_body', {
+                daily:  (data.rawMeanRate * 100).toFixed(2),
+                weekly: ((Math.pow(1 + data.rawMeanRate, 5) - 1) * 100).toFixed(1),
+                annual: ((Math.pow(1 + data.rawMeanRate, 252) - 1) * 100).toFixed(0),
+                capW:   (data.realisticWeeklyCap * 100).toFixed(0),
+                capD:   (data.realisticCap * 100).toFixed(2),
+                capA:   ((Math.pow(1 + data.realisticCap, 252) - 1) * 100).toFixed(0),
+              })}
             </div>
           </div>
         )}
         {/* Controls */}
         <div className="flex flex-wrap gap-3 items-center">
           <div className="flex items-center gap-2">
-            <span className="text-[11px] text-slate-500">Basis:</span>
+            <span className="text-[11px] text-slate-500">{t('fc.base_label')}</span>
             <div className="flex gap-0.5 bg-[#0d1117] border border-[#1f2937] rounded-lg p-0.5">
               {BASE_PERIODS.map(p => (
                 <button
@@ -193,38 +200,38 @@ function ForecastCard({ trades, accountBalance }) {
                       ? 'bg-[#3b82f6]/15 text-[#3b82f6] border border-[#3b82f6]/30'
                       : 'text-slate-500 hover:text-slate-300'}`}
                 >
-                  {p.label}
+                  {t(p.labelKey)}
                 </button>
               ))}
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-[11px] text-slate-500">Modus:</span>
+            <span className="text-[11px] text-slate-500">{t('fc.mode_label')}</span>
             <div className="flex gap-0.5 bg-[#0d1117] border border-[#1f2937] rounded-lg p-0.5">
               <button
                 onClick={() => setCompound(true)}
-                title="Tägliche Rendite als Prozent — Equity wächst exponentiell"
+                title={t('fc.compound_tip')}
                 className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors
                   ${compound
                     ? 'bg-[#10b981]/15 text-[#10b981] border border-[#10b981]/30'
                     : 'text-slate-500 hover:text-slate-300'}`}
               >
-                Zinseszins
+                {t('fc.compound')}
               </button>
               <button
                 onClick={() => setCompound(false)}
-                title="Fester Dollar-Betrag pro Tag — keine Reinvestition"
+                title={t('fc.linear_tip')}
                 className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors
                   ${!compound
                     ? 'bg-[#10b981]/15 text-[#10b981] border border-[#10b981]/30'
                     : 'text-slate-500 hover:text-slate-300'}`}
               >
-                Linear
+                {t('fc.linear')}
               </button>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-[11px] text-slate-500">Prognose:</span>
+            <span className="text-[11px] text-slate-500">{t('fc.horizon_label')}</span>
             <div className="flex gap-0.5 bg-[#0d1117] border border-[#1f2937] rounded-lg p-0.5">
               {FORECAST_HORIZONS.map(p => (
                 <button
@@ -235,7 +242,7 @@ function ForecastCard({ trades, accountBalance }) {
                       ? 'bg-[#3b82f6]/15 text-[#3b82f6] border border-[#3b82f6]/30'
                       : 'text-slate-500 hover:text-slate-300'}`}
                 >
-                  {p.label}
+                  {t(p.labelKey)}
                 </button>
               ))}
             </div>
@@ -264,7 +271,7 @@ function ForecastCard({ trades, accountBalance }) {
                 ×
               </button>
             )}
-            <span className="text-[10px] text-slate-600">/ Werktag</span>
+            <span className="text-[10px] text-slate-600">{t('fc.target_input_unit')}</span>
           </div>
         </div>
 
@@ -286,13 +293,17 @@ function ForecastCard({ trades, accountBalance }) {
               <span className="text-base">{ahead ? '🎯' : '⏳'}</span>
               <span className="text-slate-300 flex-1">
                 <strong style={{ color: ahead ? '#10b981' : '#f59e0b' }}>
-                  {ahead ? `${pct.toFixed(1)}% über Ziel` : `${Math.abs(pct).toFixed(1)}% hinter Ziel`}
+                  {ahead
+                    ? t('fc.ahead_of_target', { pct: pct.toFixed(1) })
+                    : t('fc.behind_target',   { pct: Math.abs(pct).toFixed(1) })}
                 </strong>{' '}
-                — Bei {Number(targetPct).toFixed(2)}% pro Werktag müsstest du jetzt bei{' '}
-                <span className="font-mono text-slate-200">${tgt.toFixed(0)}</span> stehen,
-                bist aber bei <span className="font-mono text-slate-200">${cur.toFixed(0)}</span>.
-                {' · Ziel in '}{forecastDays}{' Tagen: '}
-                <span className="font-mono text-[#fbbf24]">${data.targetFinal.toFixed(0)}</span>
+                — {t('fc.target_explainer', {
+                  pct:    Number(targetPct).toFixed(2),
+                  target: tgt.toFixed(0),
+                  current:cur.toFixed(0),
+                  days:   forecastDays,
+                  final:  data.targetFinal.toFixed(0),
+                })}
               </span>
             </div>
           )
@@ -301,30 +312,30 @@ function ForecastCard({ trades, accountBalance }) {
         {/* Stat Cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
           <Pill
-            label={compound ? 'Ø Rendite / Tag' : 'Ø P&L / Tag'}
+            label={compound ? t('fc.avg_return_per_day') : 'Ø P&L / Tag'}
             value={compound
               ? (data.expectedDailyRate >= 0 ? '+' : '') + (data.expectedDailyRate * 100).toFixed(3) + '%'
               : (data.expectedDailyPnl  >= 0 ? '+' : '') + '$' + data.expectedDailyPnl.toFixed(2)
             }
             color={projColor}
-            sub={`${data.baseTradingDayCount} Trading-Tage`}
+            sub={t('fc.trading_days_short', { n: data.baseTradingDayCount })}
           />
           <Pill
-            label="Aktuelle Equity"
+            label={t('fc.current_equity')}
             value={'$' + data.currentEquity.toFixed(0)}
             color="#e2e8f0"
           />
           <Pill
-            label={`In ${forecastDays} Tagen`}
+            label={t('fc.in_x_days', { days: forecastDays })}
             value={'$' + data.finalEquity.toFixed(0)}
             color={projColor}
             sub={(data.finalProfit >= 0 ? '+' : '') + '$' + data.finalProfit.toFixed(0)}
           />
           <Pill
-            label="Erwartete Rendite"
+            label={t('fc.expected_return')}
             value={(data.finalReturn >= 0 ? '+' : '') + data.finalReturn.toFixed(1) + '%'}
             color={projColor}
-            sub={`vs. ${usingLive ? 'MT5-Equity' : 'Startkapital'} $${data.baseReference.toFixed(0)}`}
+            sub={`vs. ${usingLive ? t('app.live_mt5_equity') : t('app.starting_capital')} $${data.baseReference.toFixed(0)}`}
           />
         </div>
 
@@ -440,34 +451,30 @@ function ForecastCard({ trades, accountBalance }) {
         {!positive && (
           <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-[#ef4444]/10 border border-[#ef4444]/30 text-xs text-slate-300">
             <AlertTriangle size={14} className="text-[#ef4444] flex-shrink-0 mt-0.5" />
-            <span>
-              Aktuelle Performance ist negativ — bei diesem Tempo schmilzt der Account.
-              Wechsel zur größeren Basis ({BASE_PERIODS.find(p => p.id === null)?.label}) für ein realistischeres Bild oder fix erst die Strategie.
-            </span>
+            <span>{t('fc.negative_pace', { all: t(BASE_PERIODS.find(p => p.id === null)?.labelKey || '') })}</span>
           </div>
         )}
 
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-slate-600">
           <span className="flex items-center gap-1">
             <span className="inline-block w-3 h-0.5 rounded" style={{ backgroundColor: '#10b981' }} />
-            Tatsächliche Equity
+            {t('fc.legend_actual')}
           </span>
           <span className="flex items-center gap-1">
             <span className="inline-block w-3 h-0.5 rounded" style={{ backgroundColor: projColor }} />
-            Prognose (Schnitt der letzten {BASE_PERIODS.find(p => p.id === basePeriod)?.label})
+            {t('fc.legend_forecast', { range: t(BASE_PERIODS.find(p => p.id === basePeriod)?.labelKey || '') })}
           </span>
           {data.targetEnabled && (
             <span className="flex items-center gap-1">
               <span className="inline-block w-3 h-0.5 rounded" style={{ backgroundColor: '#fbbf24' }} />
-              Ziel ({Number(targetPct).toFixed(2)}% / Werktag, Wochenenden flach)
+              {t('fc.legend_target', { pct: Number(targetPct).toFixed(2) })}
             </span>
           )}
         </div>
         <p className="text-[10px] text-slate-600">
-          Schattierter Bereich = ±1σ Vertrauensband (~68% der Pfade liegen drin).
-          {compound
-            ? ' Zinseszins-Modus: tägliche Rendite wird auf das wachsende Equity angewendet.'
-            : ' Linear-Modus: fester Dollar-Betrag pro Tag, kein Reinvestment.'}
+          {t('fc.confidence_band')}
+          {' '}
+          {compound ? t('fc.compound_note') : t('fc.linear_note')}
         </p>
       </div>
     </div>
@@ -494,9 +501,9 @@ function ParetoCard({ trades }) {
         <SectionTitle
           icon={Trophy}
           title={t('an.pareto')}
-          subtitle={`${data.topNCovers80} Trades decken 80% deines Bruttogewinns ab — der Rest ist Lärm.`}
+          subtitle={t('ac.pareto.subtitle', { n: data.topNCovers80 })}
           color="#f59e0b"
-          info="80/20-Prinzip: Trades nach Gewinn sortiert (#1 = bester). Die blaue Linie zeigt, wie viel Prozent deines Bruttogewinns (Summe aller Gewinner-Trades) die Top-N zusammen ausmachen. Liegen 80% schon bei wenigen Trades, hängt deine Edge von ein paar Ausreißern ab — der Rest ist Rauschen."
+          info={t('ac.pareto.info')}
         />
       </div>
       <div className="p-4">
@@ -529,7 +536,7 @@ function ParetoCard({ trades }) {
           </ComposedChart>
         </ResponsiveContainer>
         <p className="text-[11px] text-slate-500 mt-3">
-          Blaue Linie = kumulierter Anteil am Bruttogewinn. Wenn deine besten Trades schon den Großteil deines P&L ausmachen, ist der Rest dein Spielfeld zum Ausprobieren — verlierst du dort konstant, kostet es deine Edge.
+          {t('ac.pareto.footer')}
         </p>
       </div>
     </div>
@@ -579,9 +586,9 @@ function WhatIfCard({ trades }) {
         <SectionTitle
           icon={Calculator}
           title={t('an.whatif')}
-          subtitle="Filter rausnehmen, sofortige Auswirkung auf die Equity-Kurve sehen."
+          subtitle={t('ac.whatif.subtitle')}
           color="#10b981"
-          info="Was wäre, wenn du bestimmte Trades nie gemacht hättest? Schließe die schlechtesten X%, bestimmte Wochentage oder zu kurze Holds aus und vergleiche die neue Equity-Kurve mit dem Original. Achtung: Cherry-Picking aus der Vergangenheit ist keine Strategie für die Zukunft — der Sinn ist, Muster zu erkennen, nicht zu träumen."
+          info={t('ac.whatif.info')}
         />
       </div>
       <div className="p-4 space-y-4">
@@ -692,9 +699,9 @@ function HoldTimeScatterCard({ trades, riskAmount }) {
         <SectionTitle
           icon={Clock}
           title={t('an.holdtime')}
-          subtitle="Wie lange ein Trade läuft vs. wie viel er bringt — Edge nach Zeitfenster."
+          subtitle={t('ac.holdtime.subtitle')}
           color="#8b5cf6"
-          info="Jeder Punkt = ein Trade. X-Achse: Haltedauer in Minuten, Y-Achse: P&L. Hilft zu erkennen, ob du zu früh ausstoppst oder Gewinner zu schnell mitnimmst. Beispiel: Viele rote Punkte unter 5 Min → Du wirst aus der Volatilität rausgekickt, bevor dein Setup Zeit hatte."
+          info={t('ac.holdtime.info')}
         />
       </div>
       <div className="p-4">
@@ -762,9 +769,9 @@ function StreakStatsCard({ trades }) {
         <SectionTitle
           icon={Repeat}
           title={t('an.streak')}
-          subtitle="Wie lange laufen deine Phasen — und ist die nächste Niederlage unabhängig?"
+          subtitle={t('ac.streak.subtitle')}
           color="#06b6d4"
-          info="Längste Win/Loss-Serien und durchschnittliche Streak-Länge. Statistisch wäre dein nächster Trade unabhängig vom vorherigen — wenn deine Streaks aber deutlich länger sind als die Wahrscheinlichkeit hergibt, könnte Tilt oder Marktphasen-Bias mitspielen. Auch psychologisch wichtig: nach 5x Verlust in Folge nicht panisch werden, das ist normal."
+          info={t('ac.streak.info')}
         />
       </div>
       <div className="p-4 space-y-4">
@@ -829,9 +836,9 @@ function HeatmapCard({ trades }) {
         <SectionTitle
           icon={CalendarIcon}
           title={t('an.heatmap')}
-          subtitle="Wann öffnest du deine besten Trades? Tote Zonen sofort erkennbar."
+          subtitle={t('ac.heatmap.subtitle')}
           color="#ec4899"
-          info="Heatmap nach Wochentag × Stunde (Eröffnungszeit deiner Trades). Grün = profitabel, Rot = Verluste. Hilft, deine echten Edge-Fenster zu finden — z.B. London-Open vs. Asia-Session. Tote Zonen (kaum Trades) sind oft Zeiten, in denen du gar nicht traden solltest."
+          info={t('ac.heatmap.info')}
         />
       </div>
       <div className="p-4 space-y-2 overflow-x-auto">
@@ -893,7 +900,7 @@ function MfeMaeCard({ trades, mfeArchive, riskAmount }) {
           <SectionTitle
             icon={Activity}
             title={t('an.mfe_mae')}
-            subtitle="Wie viel vom verfügbaren Gewinn nimmst du wirklich mit?"
+            subtitle={t('ac.mfemae.subtitle_empty')}
             color="#f97316"
           />
         </div>
@@ -935,7 +942,7 @@ function MfeMaeCard({ trades, mfeArchive, riskAmount }) {
           title={t('an.mfe_mae')}
           subtitle={`Wie viel vom verfügbaren Peak-Gewinn realisierst du? · ${data.sampleSize} getrackte Trades`}
           color="#f97316"
-          info="MFE = Maximum Favorable Excursion (wie weit ein Trade in die Gewinn-Richtung lief, bevor er geschlossen wurde). MAE = Maximum Adverse Excursion (wie tief er gegen dich lief). Zeigt, ob du Gewinner zu früh schließt (niedriger Capture-Rate) oder Verlierer zu lange hältst (großer MAE)."
+          info={t('ac.mfemae.info')}
         />
       </div>
       <div className="p-4 space-y-4">
@@ -1027,7 +1034,7 @@ function BestVsWorstCard({ trades }) {
           <SectionTitle
             icon={Crosshair}
             title={t('an.best_vs_worst').split('—')[0].trim()}
-            subtitle="Was unterscheidet deine Top- von deinen Bottom-Trades?"
+            subtitle={t('ac.bestworst.subtitle_empty')}
             color="#06b6d4"
           />
         </div>
@@ -1112,9 +1119,9 @@ function BestVsWorstCard({ trades }) {
         <SectionTitle
           icon={Crosshair}
           title={t('an.best_vs_worst')}
-          subtitle="Suche nach Mustern: was machen Gewinner anders als Verlierer?"
+          subtitle={t('ac.bestworst.subtitle')}
           color="#06b6d4"
-          info="Vergleicht statistische Merkmale (Wochentag, Stunde, Symbol, Haltedauer, Tags) deiner Top-10 Gewinner mit deinen Top-10 Verlierern. Was haben deine besten Trades gemeinsam? Was teilen deine schlimmsten? Das ist Mustererkennung — keine Garantie, aber ein guter Startpunkt für Setup-Verfeinerung."
+          info={t('ac.bestworst.info')}
         />
       </div>
       <div className="p-4 space-y-4">
@@ -1183,9 +1190,9 @@ function YearlyHeatmapCard({ trades }) {
         <SectionTitle
           icon={CalendarIcon}
           title={t('an.yearly')}
-          subtitle={`Letzte 365 Tage · ${populated.length} Trading-Tage · ${positiveDays} grün / ${negativeDays} rot`}
+          subtitle={t('ac.yearly.subtitle', { days: populated.length, greens: positiveDays, reds: negativeDays })}
           color="#10b981"
-          info="GitHub-Style-Heatmap: jedes Kästchen = ein Tag, Farbintensität = Tages-P&L. Zeigt auf einen Blick deine Konsistenz übers Jahr, Lücken (Pausen), Phasen mit Häufung roter Tage, und ob du eher ein paar große Tage hast oder gleichmäßig grün bist."
+          info={t('ac.yearly.info')}
         />
       </div>
       <div className="p-4 overflow-x-auto">
@@ -1241,9 +1248,9 @@ function VolNormCard({ trades }) {
         <SectionTitle
           icon={Scale}
           title={t('an.vol_norm')}
-          subtitle="Welches Symbol bringt deine echte Edge — adjustiert für Streuung?"
+          subtitle={t('ac.volnorm.subtitle')}
           color="#8b5cf6"
-          info="Sharpe-ähnliche Kennzahl pro Symbol: Durchschnittlicher P&L geteilt durch Standardabweichung der P&Ls. Belohnt konsistente Gewinne, bestraft hohe Volatilität. Ein Symbol mit +$100 Schnitt aber wilden $500-Swings ist schlechter als +$80 Schnitt mit $100-Streuung."
+          info={t('ac.volnorm.info')}
         />
       </div>
       <div className="p-4">
@@ -1301,9 +1308,9 @@ function RecoveryCard({ trades, accountBalance }) {
         <SectionTitle
           icon={ShieldCheck}
           title={t('an.recovery')}
-          subtitle="Net-Profit ÷ Max-Drawdown — wie viel Edge pro Schmerz-Einheit?"
+          subtitle={t('ac.recovery.subtitle')}
           color="#10b981"
-          info="Recovery Factor = Gesamt-Gewinn geteilt durch maximalen Drawdown. Antwortet auf die Frage: 'Wie viel hast du verdient pro Dollar, den du zwischenzeitlich im Loch warst?' Werte >3 sind gut, >5 exzellent, <1 bedeutet dein DD war größer als dein Gewinn — riskante Strategie."
+          info={t('ac.recovery.info')}
         />
       </div>
       <div className="p-4 grid grid-cols-2 md:grid-cols-3 gap-2">
@@ -1328,7 +1335,7 @@ function MistakeCostCard({ trades }) {
           <SectionTitle
             icon={Bug}
             title={t('an.mistakes')}
-            subtitle="Was kosten dich deine schlechten Gewohnheiten?"
+            subtitle={t('ac.mistakes.subtitle_empty')}
             color="#ef4444"
           />
         </div>
@@ -1348,7 +1355,7 @@ function MistakeCostCard({ trades }) {
           title={t('an.mistakes')}
           subtitle={`${data.tradesWithMistakes} Trades mit Fehler-Tag · "saubere" Trades: ${data.cleanTrades}`}
           color="#ef4444"
-          info="Auswertung deiner manuell vergebenen Fehler-Tags (z.B. 'FOMO', 'Stop zu eng', 'gegen Trend'). Zeigt pro Fehler-Typ: Häufigkeit, kumulierter P&L-Schaden und Win-Rate. Vergleich 'saubere' vs. 'fehlerhafte' Trades zeigt dir den echten Preis deiner Disziplin-Lücken."
+          info={t('ac.mistakes.info')}
         />
       </div>
       <div className="p-4 space-y-4">
@@ -1414,9 +1421,9 @@ function WeeklyReportCard({ trades }) {
         <SectionTitle
           icon={Award}
           title={t('an.coach')}
-          subtitle={`Woche ab ${data.weekStart} · vs. Vorwoche`}
+          subtitle={t('ac.weekly.subtitle', { date: data.weekStart })}
           color="#3b82f6"
-          info="Wöchentlicher Mini-Coaching-Report: aktuelle Woche vs. Vorwoche bei P&L, Win-Rate, Trade-Anzahl, durchschnittlichem Risiko. Hilft, kurzfristige Trends zu erkennen, bevor sie zu Drawdown-Phasen werden — und zu sehen, was gerade besser läuft als sonst."
+          info={t('ac.weekly.info')}
         />
       </div>
       <div className="p-4 space-y-3">
@@ -1509,9 +1516,9 @@ function UlcerCard({ trades, accountBalance }) {
         <SectionTitle
           icon={Heart}
           title={t('an.ulcer')}
-          subtitle="Wie schmerzhaft waren deine Drawdowns — und wie lange unter Wasser?"
+          subtitle={t('ac.ulcer.subtitle')}
           color="#ef4444"
-          info="Ulcer Index misst Tiefe UND Dauer von Drawdowns kombiniert — nicht nur den Tiefstpunkt, sondern wie lange du unter Wasser warst. Zwei Strategien mit gleichem Max-DD können sich enorm unterscheiden: 1 Tag tiefes Loch vs. 3 Monate flacher Schmerz. Niedriger ist besser."
+          info={t('ac.ulcer.info')}
         />
       </div>
       <div className="p-4 grid grid-cols-2 md:grid-cols-4 gap-2">
@@ -1543,9 +1550,9 @@ function RiskOfRuinCard({ trades, accountBalance }) {
         <SectionTitle
           icon={AlertTriangle}
           title={t('an.ror')}
-          subtitle="Bei deiner WR & R-Ratio: wie viel darfst du wirklich riskieren?"
+          subtitle={t('ac.ror.subtitle')}
           color="#f59e0b"
-          info="Risk of Ruin = Wahrscheinlichkeit, dass du dein Konto auf Null fährst (oder einen definierten Schmerz-Threshold reißt), gegeben deine aktuelle Win-Rate und durchschnittliche R-Ratio. Bei 1% Risiko pro Trade ist RoR meist <0,1% — bei 5% Risiko explodiert die Zahl. Kelly-Kriterium daneben zeigt das mathematisch optimale Risiko, das du aber praktisch halbieren solltest (Half-Kelly)."
+          info={t('ac.ror.info')}
         />
       </div>
       <div className="p-4 space-y-3">
@@ -1608,9 +1615,9 @@ function SequentialCard({ trades }) {
         <SectionTitle
           icon={Flame}
           title={t('an.sequence')}
-          subtitle="Wie verändert sich dein nächster Trade je nach vorherigem Ergebnis?"
+          subtitle={t('ac.sequence.subtitle')}
           color="#ef4444"
-          info="Vergleicht Win-Rate und P&L deines nächsten Trades, abhängig vom Ergebnis des vorherigen. Statistisch sollten die Werte ähnlich sein (Trades sind unabhängig). Große Abweichungen sind ein Hinweis auf Tilt-Verhalten: nach Verlusten gehst du in Revenge-Mode, oder nach Gewinnen wirst du übermütig — beides emotional getriebene Edge-Killer."
+          info={t('ac.sequence.info')}
         />
       </div>
       <div className="p-4 space-y-3">
@@ -1667,7 +1674,7 @@ function TagComboCard({ trades }) {
           <SectionTitle
             icon={Layers}
             title={t('an.tag_matrix')}
-            subtitle="Welche Setup-Kombinationen sind dein Gold — welche dein Death-Zone?"
+            subtitle={t('ac.tags.subtitle_empty')}
             color="#8b5cf6"
           />
         </div>
@@ -1695,9 +1702,9 @@ function TagComboCard({ trades }) {
         <SectionTitle
           icon={Layers}
           title={t('an.tag_matrix')}
-          subtitle="Welche Kombination performt? (Diagonale = einzelne Tags)"
+          subtitle={t('ac.tags.subtitle')}
           color="#8b5cf6"
-          info="Matrix aller Setup-Tag-Paare: jede Zelle zeigt P&L und Trade-Anzahl, wenn beide Tags gleichzeitig vorhanden waren. Diagonale = einzelner Tag allein. Identifiziert Gold-Kombinationen (z.B. 'Trend' + 'Pullback') und Death-Zones (z.B. 'FOMO' + 'Counter-Trend')."
+          info={t('ac.tags.info')}
         />
       </div>
       <div className="p-4 overflow-x-auto">
@@ -1759,9 +1766,9 @@ function ConsistencyCard({ trades }) {
         <SectionTitle
           icon={BarChart3}
           title={t('an.consistency')}
-          subtitle="Stabile Returns oder Achterbahn?"
+          subtitle={t('ac.consistency.subtitle')}
           color="#10b981"
-          info="Coefficient of Variation deiner täglichen P&Ls: misst, wie konsistent deine Returns sind. Niedrig = gleichmäßige grüne Tage. Hoch = Achterbahn (großer Gewinntag, dann zwei rote, dann wieder ein Knaller). Prop-Firmen schauen genau hierauf — sie wollen Consistency, nicht Lottogewinne."
+          info={t('ac.consistency.info')}
         />
       </div>
       <div className="p-4 grid grid-cols-2 md:grid-cols-4 gap-2">

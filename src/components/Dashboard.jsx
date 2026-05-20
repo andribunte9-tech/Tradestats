@@ -565,9 +565,11 @@ export default function Dashboard() {
           value={`${roi >= 0 ? '+' : ''}${roi.toFixed(2)}%`}
           color={roi >= 0 ? 'text-[#10b981]' : 'text-[#ef4444]'}
           iconColor="text-[#06b6d4]"
-          sub={`${t('dash.basis_label')}: $${balanceAtPeriodStart >= 1000
-            ? (balanceAtPeriodStart / 1000).toFixed(1) + 'K'
-            : balanceAtPeriodStart.toFixed(0)}`}
+          sub={privacyMode
+            ? t('dash.basis_label')
+            : `${t('dash.basis_label')}: $${balanceAtPeriodStart >= 1000
+                ? (balanceAtPeriodStart / 1000).toFixed(1) + 'K'
+                : balanceAtPeriodStart.toFixed(0)}`}
         />
         <StatCard
           icon={Target}
@@ -784,7 +786,7 @@ export default function Dashboard() {
             </table>
           </div>
         ) : (
-          <div className="p-8 text-center text-slate-600 text-sm">Keine Trades vorhanden</div>
+          <div className="p-8 text-center text-slate-600 text-sm">{t('common.no_trades')}</div>
         )}
       </div>
     </div>
@@ -792,9 +794,10 @@ export default function Dashboard() {
 }
 
 function EmptyChart() {
+  const { t } = useLanguage()
   return (
     <div className="h-[180px] flex items-center justify-center text-slate-600 text-sm">
-      Keine Daten verfügbar
+      {t('common.no_data_available')}
     </div>
   )
 }
