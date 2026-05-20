@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import {
   Download, CheckCircle2, AlertCircle, Loader2, MonitorSmartphone,
-  Activity, ExternalLink, ChevronRight, X, Info,
+  Activity, ExternalLink, ChevronRight, X, Info, ShieldCheck, MousePointerClick,
 } from 'lucide-react'
 import { useBackendStatus } from '../hooks/useBackendStatus'
 
@@ -101,7 +101,7 @@ function SetupWizard({ status, onDismiss }) {
         title: 'Installer ausführen',
         body: 'Doppelklick auf TradeStats_Setup.exe. Folge dem Setup-Assistenten — keine besonderen Optionen nötig. Dauert ca. 30 Sek.',
         done: installed,
-        hint: 'Bei Windows-SmartScreen: "Weitere Informationen" → "Trotzdem ausführen". Der Installer ist nicht von Microsoft signiert (Code-Signing kostet 300+ €/Jahr).',
+        extraContent: <SmartScreenHint />,
       },
       {
         id: 'mt5',
@@ -280,8 +280,111 @@ function StepCard({ index, step, isActive, isLastDone }) {
           {step.hint && isActive && (
             <p className="text-[11px] text-slate-500 mt-2 italic">💡 {step.hint}</p>
           )}
+          {step.extraContent && isActive && (
+            <div className="mt-3">{step.extraContent}</div>
+          )}
         </div>
       </div>
+    </div>
+  )
+}
+
+/**
+ * Erklärt die Windows-SmartScreen-Warnung, die beim ersten Start des
+ * unsignierten Installers erscheint. Zeigt die beiden nötigen Klicks
+ * visuell, damit nervöse User wissen: das ist OK, nicht abbrechen.
+ */
+function SmartScreenHint() {
+  const [expanded, setExpanded] = useState(false)
+  return (
+    <div className="rounded-xl border border-[#3b82f6]/30 bg-[#3b82f6]/8 overflow-hidden">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full px-3 py-2.5 flex items-center justify-between gap-2 text-left
+          hover:bg-[#3b82f6]/12 transition-colors"
+      >
+        <div className="flex items-center gap-2 min-w-0">
+          <ShieldCheck size={14} className="text-[#3b82f6] shrink-0" />
+          <span className="text-[12px] font-semibold text-[#3b82f6]">
+            Windows zeigt eine Warnung? Das ist normal — so klickst du sie weg
+          </span>
+        </div>
+        <ChevronRight
+          size={14}
+          className={`text-[#3b82f6] shrink-0 transition-transform ${expanded ? 'rotate-90' : ''}`}
+        />
+      </button>
+
+      {expanded && (
+        <div className="px-3 pb-3 space-y-3">
+          <p className="text-[11px] text-slate-400 leading-relaxed">
+            Beim ersten Start blockiert <strong className="text-slate-300">Windows Defender SmartScreen</strong> den Installer,
+            weil er nicht von Microsoft signiert ist. Code-Signing-Zertifikate kosten 300+ €/Jahr — für ein Hobbyprojekt
+            unverhältnismäßig. Der Code ist <strong className="text-slate-300">offen einsehbar auf GitHub</strong>,
+            du kannst dich also selbst überzeugen, dass nichts Bösartiges drin ist.
+          </p>
+
+          {/* Mock-Dialog 1: Initialer SmartScreen */}
+          <div className="rounded-lg overflow-hidden border border-[#1f2937]">
+            <div className="bg-[#0078D4] px-3 py-2 flex items-center justify-between">
+              <span className="text-[10px] font-semibold text-white">Microsoft Defender SmartScreen</span>
+              <X size={11} className="text-white/60" />
+            </div>
+            <div className="bg-[#1a2233] px-3 py-2.5 space-y-1.5">
+              <p className="text-[11px] font-bold text-white">Der Computer wurde durch Windows geschützt</p>
+              <p className="text-[10px] text-slate-400 leading-relaxed">
+                Von Microsoft Defender SmartScreen wurde der Start einer unbekannten App verhindert.
+              </p>
+              <div className="flex items-center gap-1.5 pt-1">
+                <MousePointerClick size={11} className="text-[#10b981] shrink-0 animate-pulse" />
+                <span className="text-[10px] text-[#10b981] font-semibold underline">
+                  Weitere Informationen
+                </span>
+                <span className="text-[10px] text-slate-500">← 1. Klick hier</span>
+              </div>
+              <div className="flex justify-end pt-1">
+                <span className="text-[10px] text-slate-600 px-2 py-1 border border-[#374151] rounded">
+                  Nicht ausführen
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 text-[10px] text-slate-500">
+            <div className="flex-1 h-px bg-[#1f2937]" />
+            <span>Danach erscheint ein neuer Button:</span>
+            <div className="flex-1 h-px bg-[#1f2937]" />
+          </div>
+
+          {/* Mock-Dialog 2: Nach Klick auf "Weitere Informationen" */}
+          <div className="rounded-lg overflow-hidden border border-[#1f2937]">
+            <div className="bg-[#0078D4] px-3 py-2">
+              <span className="text-[10px] font-semibold text-white">Microsoft Defender SmartScreen</span>
+            </div>
+            <div className="bg-[#1a2233] px-3 py-2.5 space-y-1.5">
+              <p className="text-[11px] font-bold text-white">Der Computer wurde durch Windows geschützt</p>
+              <p className="text-[10px] text-slate-400">App: <span className="text-slate-300 font-mono">TradeStats_Setup.exe</span></p>
+              <div className="flex justify-end gap-1.5 pt-2">
+                <div className="flex items-center gap-1.5">
+                  <MousePointerClick size={11} className="text-[#10b981] shrink-0 animate-pulse" />
+                  <span className="text-[10px] text-slate-500">2. Klick hier →</span>
+                </div>
+                <span className="text-[10px] text-white px-2 py-1 bg-[#10b981] rounded font-semibold">
+                  Trotzdem ausführen
+                </span>
+                <span className="text-[10px] text-slate-600 px-2 py-1 border border-[#374151] rounded">
+                  Nicht ausführen
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <p className="text-[11px] text-slate-500 italic pt-1">
+            Sobald du einmal „Trotzdem ausführen" geklickt hast, merkt sich Windows die Entscheidung —
+            beim nächsten Start kommt die Warnung nicht mehr.
+          </p>
+        </div>
+      )}
     </div>
   )
 }
