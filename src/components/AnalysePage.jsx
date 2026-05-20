@@ -1,0 +1,2403 @@
+import { useState, useMemo } from 'react'
+import {
+  AreaChart, Area, BarChart, Bar, ScatterChart, Scatter,
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  Cell, ReferenceLine, Line, ComposedChart,
+} from 'recharts'
+import {
+  TrendingUp, Trophy, Clock, Flame, Calendar as CalendarIcon,
+  Heart, AlertTriangle, Calculator, Repeat, Layers, BarChart3, Info, Activity,
+  Telescope, Award, Crosshair, Scale, ShieldCheck, Bug, BookOpen, Sparkles,
+  Scaling, Link2, Zap,
+} from 'lucide-react'
+import { useTrades } from '../hooks/useTrades'
+import { usePrivacyMode, Pvt } from '../hooks/usePrivacyMode'
+import { useLiveSync } from '../hooks/useLiveSync'
+import { useLanguage } from '../hooks/useLanguage'
+import {
+  buildParetoContribution, applyWhatIf, buildHoldTimeScatter,
+  buildStreakStats, buildWeekHourHeatmap, calcUlcerIndex,
+  calcRiskOfRuin, calcKelly, calcSequentialBias,
+  buildTagComboMatrix, calcConsistency, buildEquityForecast,
+  buildMfeMaeAnalysis, buildBestVsWorst, buildYearlyHeatmap,
+  buildVolatilityNormalized, calcRecoveryFactor, buildMistakeAnalysis,
+  buildWeeklyReport, buildCoachInsights, buildAvgHoldByDay,
+  buildSizingConsistency, buildConcurrentPositions, buildTradingFrequency,
+} from '../utils/analytics'
+import { buildEquityCurve, calcStats, formatDuration } from '../utils/calculations'
+
+const RISK_KEY = 'tradestats_risk_percent'
+
+/* ─── Section Header ─────────────────────────────────────── */
+function SectionTitle({ icon: Icon, title, subtitle, color = '#3b82f6', info }) {
+  return (
+    <div className="flex items-start gap-3 mb-3">
+      <div className="p-2 rounded-lg" style={{ backgroundColor: color + '15' }}>
+        <Icon size={16} style={{ color }} />
+      </div>
+      <div className="min-w-0">
+        <div className="flex items-center gap-1.5">
+          <h2 className="text-sm font-semibold text-slate-200">{title}</h2>
+          {info && (
+            <span className="relative group inline-flex">
+              <Info size={12} className="text-slate-500 hover:text-slate-300 cursor-help" />
+              <span
+                role="tooltip"
+                className="pointer-events-none absolute left-1/2 -translate-x-1/2 top-full mt-1.5 z-50
+                  hidden group-hover:block w-72 bg-[#1a2233] border border-[#374151]
+                  rounded-lg px-3 py-2 text-[11px] text-slate-300 leading-relaxed shadow-xl
+                  whitespace-normal"
+              >
+                {info}
+              </span>
+            </span>
+          )}
+        </div>
+        {subtitle && <p className="text-[11px] text-slate-500 mt-0.5">{subtitle}</p>}
+      </div>
+    </div>
+  )
+}
+
+/* ─── Stat Pill ──────────────────────────────────────────── */
+function Pill({ label, value, color, sub }) {
+  return (
+    <div className="rounded-xl border border-[#1f2937] bg-[#0d1117] p-3">
+      <div className="text-[10px] text-slate-500 uppercase tracking-wide font-semibold mb-1">{label}</div>
+      <div className={`text-lg font-mono font-bold`} style={{ color }}>{value}</div>
+      {sub && <div className="text-[10px] text-slate-600 mt-0.5">{sub}</div>}
+    </div>
+  )
+}
+
+/* ============================================================
+ * 0. EQUITY FORECAST
+ * ============================================================ */
+const BASE_PERIODS = [
+  { id: 7,    label: '7 Tage' },
+  { id: 30,   label: '30 Tage' },
+  { id: 90,   label: '90 Tage' },
+  { id: null, label: 'Alles' },
+]
+const FORECAST_HORIZONS = [
+  { id: 30,  label: '1 Monat' },
+  { id: 90,  label: '3 Monate' },
+  { id: 180, label: '6 Monate' },
+  { id: 365, label: '1 Jahr' },
+]
+
+const TARGET_PCT_KEY = 'tradestats_forecast_target_pct'
+
+function ForecastCard({ trades, accountBalance }) {
+  const { t } = useLanguage()
+  const [basePeriod, setBasePeriod]     = useState(30)
+  const [forecastDays, setForecastDays] = useState(90)
+  const [compound, setCompound]         = useState(true)
+  const [targetPct, setTargetPct]       = useState(() => {
+    const v = localStorage.getItem(TARGET_PCT_KEY)
+    return v != null ? v : ''
+  })
+
+  function updateTargetPct(v) {
+    setTargetPct(v)
+    if (v === '' || v == null) localStorage.removeItem(TARGET_PCT_KEY)
+    else localStorage.setItem(TARGET_PCT_KEY, String(v))
+  }
+
+  const { status } = useLiveSync()
+  const mt5Equity  = status?.connected ? status.account?.equity : null
+  const liveEquity = mt5Equity || accountBalance || 10000
+  const usingLive  = mt5Equity != null
+
+  const data = useMemo(() => buildEquityForecast({
+    trades,
+    basePeriodDays: basePeriod,
+    forecastDays,
+    startingBalance: accountBalance || 10000,
+    currentEquity: mt5Equity,
+    compound,
+    targetDailyPct: targetPct === '' ? null : Number(targetPct),
+  }), [trades, basePeriod, forecastDays, accountBalance, mt5Equity, compound, targetPct])
+
+  if (!data) return null
+
+  const positive = compound ? data.expectedDailyRate > 0 : data.expectedDailyPnl > 0
+  const projColor = positive ? '#10b981' : '#ef4444'
+  // milestone targets — anchored on live equity if available
+  const milestones = useMemo(() => {
+    if (!positive) return []
+    if (compound && data.expectedDailyRate <= 0) return []
+    if (!compound && data.expectedDailyPnl <= 0) return []
+    const targets = [
+      { label: 'Verdopplung',        value: liveEquity * 2 },
+      { label: '+25%',               value: liveEquity * 1.25 },
+      { label: 'Nächste $1k-Marke', value: Math.ceil(data.currentEquity / 1000) * 1000 + 1000 },
+    ]
+    return targets.map(t => {
+      const need = t.value - data.currentEquity
+      if (need <= 0) return { ...t, days: 0, reached: true }
+      let days
+      if (compound) {
+        // Solve: currentEquity * (1 + r)^n = target  →  n = log(target/E0) / log(1+r)
+        const ratio = t.value / data.currentEquity
+        const r1    = 1 + data.expectedDailyRate
+        days = r1 > 1 ? Math.ceil(Math.log(ratio) / Math.log(r1)) : Infinity
+      } else {
+        days = Math.ceil(need / data.expectedDailyPnl)
+      }
+      return { ...t, days, reached: false }
+    }).filter(t => !t.reached || true)
+  }, [data, liveEquity, positive, compound])
+
+  return (
+    <div className="card">
+      <div className="card-header">
+        <SectionTitle
+          icon={Telescope}
+          title={t('an.forecast')}
+          subtitle={`Wenn dein Schnitt der letzten ${BASE_PERIODS.find(p => p.id === basePeriod)?.label} so weiterläuft.`}
+          color="#3b82f6"
+          info="Projiziert deine Equity-Kurve in die Zukunft, basierend auf dem durchschnittlichen Tages-P&L der gewählten Basis-Periode. Compound = Zinseszins (Risiko skaliert mit Kapital), Linear = fester Dollar-Betrag pro Tag. Keine Prophezeiung — nur eine Hochrechnung deiner aktuellen Performance."
+        />
+        {usingLive && (
+          <span className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full font-semibold
+            bg-[#10b981]/15 text-[#10b981] border border-[#10b981]/30">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#10b981] animate-pulse" />
+            Live MT5-Equity
+          </span>
+        )}
+      </div>
+      <div className="p-4 space-y-4">
+        {/* Realistic-Cap Warnung */}
+        {data.wasCapped && compound && (
+          <div className="rounded-lg border border-[#f59e0b]/40 bg-[#f59e0b]/10 p-3 flex items-start gap-3">
+            <AlertTriangle size={14} className="text-[#f59e0b] shrink-0 mt-0.5" />
+            <div className="text-[12px] text-slate-300 leading-relaxed">
+              <span className="font-semibold text-[#f59e0b]">Prognose realistisch gekappt:</span>{' '}
+              Dein historischer Schnitt liegt bei <span className="font-mono text-white">{(data.rawMeanRate * 100).toFixed(2)}%</span> pro Trading-Tag (~<span className="font-mono text-white">{((Math.pow(1 + data.rawMeanRate, 5) - 1) * 100).toFixed(1)}%</span> pro Woche) — hochgerechnet wären das absurde ~{((Math.pow(1 + data.rawMeanRate, 252) - 1) * 100).toFixed(0)}% pro Jahr. Mit wachsendem Konto greifen aber Slippage, Position-Size-Limits und Markt-Impact. Die Prognose verwendet deshalb maximal{' '}
+              <span className="font-mono text-white">{(data.realisticWeeklyCap * 100).toFixed(0)}%</span> Wachstum pro Trading-Woche (entspricht ~{(data.realisticCap * 100).toFixed(2)}% pro Tag, ~{((Math.pow(1 + data.realisticCap, 252) - 1) * 100).toFixed(0)}% p.a.).
+            </div>
+          </div>
+        )}
+        {/* Controls */}
+        <div className="flex flex-wrap gap-3 items-center">
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] text-slate-500">Basis:</span>
+            <div className="flex gap-0.5 bg-[#0d1117] border border-[#1f2937] rounded-lg p-0.5">
+              {BASE_PERIODS.map(p => (
+                <button
+                  key={p.id || 'all'}
+                  onClick={() => setBasePeriod(p.id)}
+                  className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors
+                    ${basePeriod === p.id
+                      ? 'bg-[#3b82f6]/15 text-[#3b82f6] border border-[#3b82f6]/30'
+                      : 'text-slate-500 hover:text-slate-300'}`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] text-slate-500">Modus:</span>
+            <div className="flex gap-0.5 bg-[#0d1117] border border-[#1f2937] rounded-lg p-0.5">
+              <button
+                onClick={() => setCompound(true)}
+                title="Tägliche Rendite als Prozent — Equity wächst exponentiell"
+                className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors
+                  ${compound
+                    ? 'bg-[#10b981]/15 text-[#10b981] border border-[#10b981]/30'
+                    : 'text-slate-500 hover:text-slate-300'}`}
+              >
+                Zinseszins
+              </button>
+              <button
+                onClick={() => setCompound(false)}
+                title="Fester Dollar-Betrag pro Tag — keine Reinvestition"
+                className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors
+                  ${!compound
+                    ? 'bg-[#10b981]/15 text-[#10b981] border border-[#10b981]/30'
+                    : 'text-slate-500 hover:text-slate-300'}`}
+              >
+                Linear
+              </button>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] text-slate-500">Prognose:</span>
+            <div className="flex gap-0.5 bg-[#0d1117] border border-[#1f2937] rounded-lg p-0.5">
+              {FORECAST_HORIZONS.map(p => (
+                <button
+                  key={p.id}
+                  onClick={() => setForecastDays(p.id)}
+                  className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors
+                    ${forecastDays === p.id
+                      ? 'bg-[#3b82f6]/15 text-[#3b82f6] border border-[#3b82f6]/30'
+                      : 'text-slate-500 hover:text-slate-300'}`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] text-slate-500">Tagesziel:</span>
+            <div className="relative">
+              <input
+                type="number"
+                step="0.1"
+                min="0"
+                max="100"
+                value={targetPct}
+                onChange={e => updateTargetPct(e.target.value)}
+                placeholder="z.B. 0.5"
+                className="input w-24 text-xs font-mono pr-6"
+              />
+              <span className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 text-xs pointer-events-none">%</span>
+            </div>
+            {targetPct !== '' && (
+              <button
+                onClick={() => updateTargetPct('')}
+                className="text-[11px] text-slate-500 hover:text-slate-300"
+                title="Tagesziel deaktivieren"
+              >
+                ×
+              </button>
+            )}
+            <span className="text-[10px] text-slate-600">/ Werktag</span>
+          </div>
+        </div>
+
+        {/* Target vs Actual banner */}
+        {data.targetEnabled && (() => {
+          const cur  = data.currentEquity
+          const tgt  = data.targetCurrent
+          const diff = cur - tgt
+          const pct  = tgt > 0 ? (diff / tgt) * 100 : 0
+          const ahead = diff >= 0
+          return (
+            <div
+              className="flex items-start gap-2 px-3 py-2.5 rounded-lg border text-xs"
+              style={{
+                borderColor: ahead ? '#10b98140' : '#f59e0b40',
+                backgroundColor: ahead ? '#10b9810a' : '#f59e0b0a',
+              }}
+            >
+              <span className="text-base">{ahead ? '🎯' : '⏳'}</span>
+              <span className="text-slate-300 flex-1">
+                <strong style={{ color: ahead ? '#10b981' : '#f59e0b' }}>
+                  {ahead ? `${pct.toFixed(1)}% über Ziel` : `${Math.abs(pct).toFixed(1)}% hinter Ziel`}
+                </strong>{' '}
+                — Bei {Number(targetPct).toFixed(2)}% pro Werktag müsstest du jetzt bei{' '}
+                <span className="font-mono text-slate-200">${tgt.toFixed(0)}</span> stehen,
+                bist aber bei <span className="font-mono text-slate-200">${cur.toFixed(0)}</span>.
+                {' · Ziel in '}{forecastDays}{' Tagen: '}
+                <span className="font-mono text-[#fbbf24]">${data.targetFinal.toFixed(0)}</span>
+              </span>
+            </div>
+          )
+        })()}
+
+        {/* Stat Cards */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          <Pill
+            label={compound ? 'Ø Rendite / Tag' : 'Ø P&L / Tag'}
+            value={compound
+              ? (data.expectedDailyRate >= 0 ? '+' : '') + (data.expectedDailyRate * 100).toFixed(3) + '%'
+              : (data.expectedDailyPnl  >= 0 ? '+' : '') + '$' + data.expectedDailyPnl.toFixed(2)
+            }
+            color={projColor}
+            sub={`${data.baseTradingDayCount} Trading-Tage`}
+          />
+          <Pill
+            label="Aktuelle Equity"
+            value={'$' + data.currentEquity.toFixed(0)}
+            color="#e2e8f0"
+          />
+          <Pill
+            label={`In ${forecastDays} Tagen`}
+            value={'$' + data.finalEquity.toFixed(0)}
+            color={projColor}
+            sub={(data.finalProfit >= 0 ? '+' : '') + '$' + data.finalProfit.toFixed(0)}
+          />
+          <Pill
+            label="Erwartete Rendite"
+            value={(data.finalReturn >= 0 ? '+' : '') + data.finalReturn.toFixed(1) + '%'}
+            color={projColor}
+            sub={`vs. ${usingLive ? 'MT5-Equity' : 'Startkapital'} $${data.baseReference.toFixed(0)}`}
+          />
+        </div>
+
+        {/* Chart */}
+        <ResponsiveContainer width="100%" height={280}>
+          <ComposedChart data={data.combined} margin={{ top: 5, right: 5, bottom: 0, left: 0 }}>
+            <defs>
+              <linearGradient id="forecastBand" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%"   stopColor={projColor} stopOpacity={0.18} />
+                <stop offset="100%" stopColor={projColor} stopOpacity={0.02} />
+              </linearGradient>
+              <linearGradient id="actualFill" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%"   stopColor="#10b981" stopOpacity={0.25} />
+                <stop offset="100%" stopColor="#10b981" stopOpacity={0.02} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" vertical={false} />
+            <XAxis
+              dataKey="date"
+              tick={{ fill: '#6b7280', fontSize: 10 }}
+              axisLine={false} tickLine={false}
+              interval="preserveStartEnd"
+              minTickGap={50}
+            />
+            <YAxis
+              tick={{ fill: '#6b7280', fontSize: 10 }}
+              axisLine={false} tickLine={false}
+              width={55}
+              tickFormatter={v => '$' + (v >= 1000 ? (v / 1000).toFixed(1) + 'k' : v.toFixed(0))}
+            />
+            <Tooltip
+              content={({ active, payload, label }) => {
+                if (!active || !payload?.length) return null
+                const isProj = payload.some(p => p.dataKey === 'forecast' && p.value != null)
+                return (
+                  <div className="bg-[#1a2233] border border-[#374151] rounded-lg px-3 py-2 text-xs">
+                    <p className="text-slate-400 mb-1">
+                      {label} {isProj && <span className="text-[#3b82f6]">(Prognose)</span>}
+                    </p>
+                    {payload.map((p, i) => {
+                      if (p.value == null) return null
+                      const labels = {
+                        actual:   'Equity',
+                        forecast: 'Prognose',
+                        upper:    'Optimistisch',
+                        lower:    'Pessimistisch',
+                        target:   'Ziel',
+                      }
+                      return (
+                        <p key={i} className="font-mono" style={{ color: p.color }}>
+                          {labels[p.dataKey] || p.dataKey}: ${p.value.toFixed(2)}
+                        </p>
+                      )
+                    })}
+                  </div>
+                )
+              }}
+            />
+            <ReferenceLine
+              y={data.baseReference}
+              stroke="#6b7280"
+              strokeDasharray="3 3"
+              label={{ value: usingLive ? 'Jetzt' : 'Start', position: 'left', fill: '#6b7280', fontSize: 9 }}
+            />
+            {/* Confidence band */}
+            <Area type="monotone" dataKey="upper" stroke="none" fill="url(#forecastBand)" connectNulls={false} />
+            <Area type="monotone" dataKey="lower" stroke="none" fill="#0f1724" connectNulls={false} />
+            {/* Actual line */}
+            <Area type="monotone" dataKey="actual" stroke="#10b981" strokeWidth={2} fill="url(#actualFill)" dot={false} connectNulls={false} />
+            {/* Forecast line (dashed) */}
+            <Line type="monotone" dataKey="forecast" stroke={projColor} strokeWidth={2} strokeDasharray="5 4" dot={false} connectNulls={false} />
+            {/* Target line (weekdays-only compound) */}
+            {data.targetEnabled && (
+              <Line type="monotone" dataKey="target" stroke="#fbbf24" strokeWidth={2} strokeDasharray="2 3" dot={false} connectNulls={false} />
+            )}
+          </ComposedChart>
+        </ResponsiveContainer>
+
+        {/* Milestones */}
+        {positive && milestones.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-[11px] text-slate-500 uppercase tracking-wider font-medium">Wenn das Tempo so bleibt — Ziele</p>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+              {milestones.map(m => {
+                const date = new Date(Date.now() + m.days * 86400000)
+                return (
+                  <div key={m.label} className="rounded-lg border border-[#1f2937] bg-[#0d1117] p-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] text-slate-500">{m.label}</span>
+                      <span className="text-[10px] text-slate-600 font-mono">${m.value.toFixed(0)}</span>
+                    </div>
+                    <div className="mt-1.5">
+                      {m.reached ? (
+                        <span className="text-sm text-[#10b981] font-bold">✓ erreicht</span>
+                      ) : (
+                        <>
+                          <span className="text-lg font-mono font-bold text-[#3b82f6]">
+                            {m.days < 365 ? `${m.days} Tage` : `${(m.days / 365).toFixed(1)} Jahre`}
+                          </span>
+                          <span className="text-[10px] text-slate-500 ml-2 font-mono">
+                            ≈ {date.toLocaleDateString('de-DE', { month: 'short', year: '2-digit' })}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
+        {!positive && (
+          <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-[#ef4444]/10 border border-[#ef4444]/30 text-xs text-slate-300">
+            <AlertTriangle size={14} className="text-[#ef4444] flex-shrink-0 mt-0.5" />
+            <span>
+              Aktuelle Performance ist negativ — bei diesem Tempo schmilzt der Account.
+              Wechsel zur größeren Basis ({BASE_PERIODS.find(p => p.id === null)?.label}) für ein realistischeres Bild oder fix erst die Strategie.
+            </span>
+          </div>
+        )}
+
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-slate-600">
+          <span className="flex items-center gap-1">
+            <span className="inline-block w-3 h-0.5 rounded" style={{ backgroundColor: '#10b981' }} />
+            Tatsächliche Equity
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="inline-block w-3 h-0.5 rounded" style={{ backgroundColor: projColor }} />
+            Prognose (Schnitt der letzten {BASE_PERIODS.find(p => p.id === basePeriod)?.label})
+          </span>
+          {data.targetEnabled && (
+            <span className="flex items-center gap-1">
+              <span className="inline-block w-3 h-0.5 rounded" style={{ backgroundColor: '#fbbf24' }} />
+              Ziel ({Number(targetPct).toFixed(2)}% / Werktag, Wochenenden flach)
+            </span>
+          )}
+        </div>
+        <p className="text-[10px] text-slate-600">
+          Schattierter Bereich = ±1σ Vertrauensband (~68% der Pfade liegen drin).
+          {compound
+            ? ' Zinseszins-Modus: tägliche Rendite wird auf das wachsende Equity angewendet.'
+            : ' Linear-Modus: fester Dollar-Betrag pro Tag, kein Reinvestment.'}
+        </p>
+      </div>
+    </div>
+  )
+}
+
+/* ============================================================
+ * 1. PARETO — Equity-Beitrag
+ * ============================================================ */
+function ParetoCard({ trades }) {
+  const { t } = useLanguage()
+  const data = useMemo(() => buildParetoContribution(trades), [trades])
+  if (!data.rows.length) return null
+  const top20 = data.rows.slice(0, 20).map((r, i) => ({
+    name: `#${i + 1}`,
+    pnl: r.pnl,
+    cumPct: r.cumulativePct,
+    symbol: r.symbol,
+  }))
+
+  return (
+    <div className="card">
+      <div className="card-header">
+        <SectionTitle
+          icon={Trophy}
+          title={t('an.pareto')}
+          subtitle={`${data.topNCovers80} Trades decken 80% deines Bruttogewinns ab — der Rest ist Lärm.`}
+          color="#f59e0b"
+          info="80/20-Prinzip: Trades nach Gewinn sortiert (#1 = bester). Die blaue Linie zeigt, wie viel Prozent deines Bruttogewinns (Summe aller Gewinner-Trades) die Top-N zusammen ausmachen. Liegen 80% schon bei wenigen Trades, hängt deine Edge von ein paar Ausreißern ab — der Rest ist Rauschen."
+        />
+      </div>
+      <div className="p-4">
+        <ResponsiveContainer width="100%" height={260}>
+          <ComposedChart data={top20} margin={{ top: 5, right: 5, bottom: 0, left: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" vertical={false} />
+            <XAxis dataKey="name" tick={{ fill: '#6b7280', fontSize: 10 }} axisLine={false} tickLine={false} />
+            <YAxis yAxisId="left" tick={{ fill: '#6b7280', fontSize: 10 }} axisLine={false} tickLine={false} width={45} />
+            <YAxis yAxisId="right" orientation="right" tick={{ fill: '#6b7280', fontSize: 10 }} axisLine={false} tickLine={false} width={35} unit="%" domain={[0, 100]} />
+            <Tooltip
+              content={({ active, payload }) => {
+                if (!active || !payload?.length) return null
+                const d = payload[0].payload
+                return (
+                  <div className="bg-[#1a2233] border border-[#374151] rounded-lg px-3 py-2 text-xs">
+                    <p className="text-slate-300 font-semibold">{d.symbol}</p>
+                    <p className="font-mono" style={{ color: d.pnl >= 0 ? '#10b981' : '#ef4444' }}>
+                      {d.pnl >= 0 ? '+' : ''}${d.pnl.toFixed(2)}
+                    </p>
+                    <p className="text-[#3b82f6] font-mono">Kumuliert: {d.cumPct.toFixed(1)}%</p>
+                  </div>
+                )
+              }}
+            />
+            <Bar yAxisId="left" dataKey="pnl" radius={[3, 3, 0, 0]}>
+              {top20.map((d, i) => <Cell key={i} fill={d.pnl >= 0 ? '#10b981' : '#ef4444'} fillOpacity={0.85} />)}
+            </Bar>
+            <Line yAxisId="right" type="monotone" dataKey="cumPct" stroke="#3b82f6" strokeWidth={2} dot={false} />
+            <ReferenceLine yAxisId="right" y={80} stroke="#3b82f6" strokeDasharray="3 3" />
+          </ComposedChart>
+        </ResponsiveContainer>
+        <p className="text-[11px] text-slate-500 mt-3">
+          Blaue Linie = kumulierter Anteil am Bruttogewinn. Wenn deine besten Trades schon den Großteil deines P&L ausmachen, ist der Rest dein Spielfeld zum Ausprobieren — verlierst du dort konstant, kostet es deine Edge.
+        </p>
+      </div>
+    </div>
+  )
+}
+
+/* ============================================================
+ * 2. WAS-WÄRE-WENN
+ * ============================================================ */
+function WhatIfCard({ trades }) {
+  const { t } = useLanguage()
+  const [excludeWorstPct, setExcludeWorstPct] = useState(0)
+  const [excludeFriday, setExcludeFriday]     = useState(false)
+  const [excludeMonday, setExcludeMonday]     = useState(false)
+  const [excludeShortHolds, setExcludeShortHolds] = useState(0)
+
+  const filtered = useMemo(() => applyWhatIf(trades, {
+    excludeWorstPct,
+    excludeWeekdays: [
+      ...(excludeFriday ? [5] : []),
+      ...(excludeMonday ? [1] : []),
+    ],
+    excludeHoldLessThanMin: excludeShortHolds,
+  }), [trades, excludeWorstPct, excludeFriday, excludeMonday, excludeShortHolds])
+
+  const baseStats = useMemo(() => calcStats(trades), [trades])
+  const newStats  = useMemo(() => calcStats(filtered), [filtered])
+  const baseEq    = useMemo(() => buildEquityCurve(trades), [trades])
+  const newEq     = useMemo(() => buildEquityCurve(filtered), [filtered])
+
+  const combined = useMemo(() => {
+    const map = new Map()
+    baseEq.forEach(p => map.set(p.date, { date: p.date, original: p.equity, whatIf: null }))
+    newEq.forEach(p => {
+      if (map.has(p.date)) map.get(p.date).whatIf = p.equity
+      else map.set(p.date, { date: p.date, original: null, whatIf: p.equity })
+    })
+    return [...map.values()]
+  }, [baseEq, newEq])
+
+  const deltaPnl = newStats.totalPnl - baseStats.totalPnl
+  const removed  = trades.length - filtered.length
+
+  return (
+    <div className="card">
+      <div className="card-header">
+        <SectionTitle
+          icon={Calculator}
+          title={t('an.whatif')}
+          subtitle="Filter rausnehmen, sofortige Auswirkung auf die Equity-Kurve sehen."
+          color="#10b981"
+          info="Was wäre, wenn du bestimmte Trades nie gemacht hättest? Schließe die schlechtesten X%, bestimmte Wochentage oder zu kurze Holds aus und vergleiche die neue Equity-Kurve mit dem Original. Achtung: Cherry-Picking aus der Vergangenheit ist keine Strategie für die Zukunft — der Sinn ist, Muster zu erkennen, nicht zu träumen."
+        />
+      </div>
+      <div className="p-4 space-y-4">
+        {/* Controls */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div>
+            <label className="text-[11px] text-slate-500 block mb-1.5">
+              Schlechteste {excludeWorstPct}% Trades ausschließen
+            </label>
+            <input
+              type="range" min={0} max={30} step={1}
+              value={excludeWorstPct}
+              onChange={e => setExcludeWorstPct(Number(e.target.value))}
+              className="w-full accent-[#10b981]"
+            />
+          </div>
+          <div>
+            <label className="text-[11px] text-slate-500 block mb-1.5">
+              Trades &lt; {excludeShortHolds} min ausschließen
+            </label>
+            <input
+              type="range" min={0} max={120} step={5}
+              value={excludeShortHolds}
+              onChange={e => setExcludeShortHolds(Number(e.target.value))}
+              className="w-full accent-[#10b981]"
+            />
+          </div>
+          <div className="flex items-center gap-3">
+            <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+              <input type="checkbox" checked={excludeMonday} onChange={e => setExcludeMonday(e.target.checked)} className="accent-[#10b981]" />
+              Montag-Trades raus
+            </label>
+            <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+              <input type="checkbox" checked={excludeFriday} onChange={e => setExcludeFriday(e.target.checked)} className="accent-[#10b981]" />
+              Freitag-Trades raus
+            </label>
+          </div>
+        </div>
+
+        {/* Stats Compare */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          <Pill label="Trades" value={`${filtered.length} / ${trades.length}`} color="#e2e8f0" sub={`–${removed}`} />
+          <Pill label="P&L Δ" value={(deltaPnl >= 0 ? '+' : '') + '$' + deltaPnl.toFixed(0)} color={deltaPnl >= 0 ? '#10b981' : '#ef4444'} />
+          <Pill label="Win Rate" value={newStats.winRate.toFixed(1) + '%'} color={newStats.winRate >= baseStats.winRate ? '#10b981' : '#ef4444'} sub={`Vorher: ${baseStats.winRate.toFixed(1)}%`} />
+          <Pill label="Profit Faktor" value={newStats.profitFactor === Infinity ? '∞' : newStats.profitFactor.toFixed(2)} color={newStats.profitFactor >= baseStats.profitFactor ? '#10b981' : '#ef4444'} sub={`Vorher: ${baseStats.profitFactor === Infinity ? '∞' : baseStats.profitFactor.toFixed(2)}`} />
+        </div>
+
+        {/* Compare Chart */}
+        <ResponsiveContainer width="100%" height={220}>
+          <AreaChart data={combined} margin={{ top: 5, right: 5, bottom: 0, left: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" vertical={false} />
+            <XAxis dataKey="date" tick={{ fill: '#6b7280', fontSize: 10 }} axisLine={false} tickLine={false} />
+            <YAxis tick={{ fill: '#6b7280', fontSize: 10 }} axisLine={false} tickLine={false} width={45} />
+            <Tooltip
+              content={({ active, payload, label }) => {
+                if (!active || !payload?.length) return null
+                return (
+                  <div className="bg-[#1a2233] border border-[#374151] rounded-lg px-3 py-2 text-xs">
+                    <p className="text-slate-400">{label}</p>
+                    {payload.map((p, i) => (
+                      <p key={i} className="font-mono" style={{ color: p.color }}>
+                        {p.name}: ${p.value?.toFixed(2)}
+                      </p>
+                    ))}
+                  </div>
+                )
+              }}
+            />
+            <Area type="monotone" dataKey="original" name="Original" stroke="#6b7280" strokeWidth={1.5} fill="#6b7280" fillOpacity={0.1} dot={false} />
+            <Area type="monotone" dataKey="whatIf"   name="Mit Filter" stroke="#10b981" strokeWidth={2} fill="#10b981" fillOpacity={0.18} dot={false} />
+          </AreaChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  )
+}
+
+/* ============================================================
+ * 3. HOLD-TIME vs OUTCOME
+ * ============================================================ */
+function HoldTimeScatterCard({ trades, riskAmount }) {
+  const { t } = useLanguage()
+  const data = useMemo(() => buildHoldTimeScatter(trades, riskAmount), [trades, riskAmount])
+  if (!data.length) return null
+  // bucket-based averages for trend overlay
+  const buckets = [
+    { max: 0.5,  label: '<30m' },
+    { max: 2,    label: '30m-2h' },
+    { max: 6,    label: '2-6h' },
+    { max: 24,   label: '6-24h' },
+    { max: 999,  label: '>1d' },
+  ]
+  const summary = buckets.map(b => {
+    const arr = data.filter(d => d.holdH > 0 && d.holdH <= b.max && (buckets.indexOf(b) === 0 || d.holdH > buckets[buckets.indexOf(b) - 1].max))
+    if (!arr.length) return null
+    const wins = arr.filter(d => d.win).length
+    return {
+      label: b.label,
+      count: arr.length,
+      winRate: (wins / arr.length) * 100,
+      avgPnl: arr.reduce((s, d) => s + d.pnl, 0) / arr.length,
+    }
+  }).filter(Boolean)
+
+  return (
+    <div className="card">
+      <div className="card-header">
+        <SectionTitle
+          icon={Clock}
+          title={t('an.holdtime')}
+          subtitle="Wie lange ein Trade läuft vs. wie viel er bringt — Edge nach Zeitfenster."
+          color="#8b5cf6"
+          info="Jeder Punkt = ein Trade. X-Achse: Haltedauer in Minuten, Y-Achse: P&L. Hilft zu erkennen, ob du zu früh ausstoppst oder Gewinner zu schnell mitnimmst. Beispiel: Viele rote Punkte unter 5 Min → Du wirst aus der Volatilität rausgekickt, bevor dein Setup Zeit hatte."
+        />
+      </div>
+      <div className="p-4">
+        <ResponsiveContainer width="100%" height={260}>
+          <ScatterChart margin={{ top: 5, right: 10, bottom: 5, left: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+            <XAxis
+              type="number" dataKey="holdH" name="Stunden" scale="log" domain={[0.01, 'dataMax']}
+              tick={{ fill: '#6b7280', fontSize: 10 }} axisLine={false} tickLine={false}
+              tickFormatter={(v) => v < 1 ? `${(v*60).toFixed(0)}m` : `${v.toFixed(1)}h`}
+            />
+            <YAxis type="number" dataKey="pnl" tick={{ fill: '#6b7280', fontSize: 10 }} axisLine={false} tickLine={false} width={45} />
+            <ReferenceLine y={0} stroke="#374151" />
+            <Tooltip
+              cursor={{ stroke: '#374151', strokeDasharray: '3 3' }}
+              content={({ active, payload }) => {
+                if (!active || !payload?.length) return null
+                const d = payload[0].payload
+                return (
+                  <div className="bg-[#1a2233] border border-[#374151] rounded-lg px-3 py-2 text-xs">
+                    <p className="text-slate-300 font-semibold">{d.symbol}</p>
+                    <p className="font-mono text-slate-400">Dauer: {d.holdH < 1 ? `${(d.holdH * 60).toFixed(0)}m` : `${d.holdH.toFixed(1)}h`}</p>
+                    <p className="font-mono" style={{ color: d.pnl >= 0 ? '#10b981' : '#ef4444' }}>{d.pnl >= 0 ? '+' : ''}${d.pnl.toFixed(2)}</p>
+                  </div>
+                )
+              }}
+            />
+            <Scatter data={data} fill="#8b5cf6">
+              {data.map((d, i) => (
+                <Cell key={i} fill={d.win ? '#10b981' : '#ef4444'} fillOpacity={0.7} />
+              ))}
+            </Scatter>
+          </ScatterChart>
+        </ResponsiveContainer>
+        {summary.length > 0 && (
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mt-4">
+            {summary.map(s => (
+              <div key={s.label} className="rounded-lg border border-[#1f2937] bg-[#0d1117] p-2 text-center">
+                <div className="text-[10px] text-slate-500">{s.label}</div>
+                <div className={`text-sm font-mono font-bold ${s.winRate >= 50 ? 'text-[#10b981]' : 'text-[#ef4444]'}`}>
+                  {s.winRate.toFixed(0)}% WR
+                </div>
+                <div className={`text-[10px] font-mono ${s.avgPnl >= 0 ? 'text-[#10b981]' : 'text-[#ef4444]'}`}>
+                  Ø {s.avgPnl >= 0 ? '+' : ''}${s.avgPnl.toFixed(0)} · {s.count}T
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/* ============================================================
+ * 4. STREAK-STATISTIK
+ * ============================================================ */
+function StreakStatsCard({ trades }) {
+  const { t } = useLanguage()
+  const stats = useMemo(() => buildStreakStats(trades), [trades])
+  if (!stats) return null
+  return (
+    <div className="card">
+      <div className="card-header">
+        <SectionTitle
+          icon={Repeat}
+          title={t('an.streak')}
+          subtitle="Wie lange laufen deine Phasen — und ist die nächste Niederlage unabhängig?"
+          color="#06b6d4"
+          info="Längste Win/Loss-Serien und durchschnittliche Streak-Länge. Statistisch wäre dein nächster Trade unabhängig vom vorherigen — wenn deine Streaks aber deutlich länger sind als die Wahrscheinlichkeit hergibt, könnte Tilt oder Marktphasen-Bias mitspielen. Auch psychologisch wichtig: nach 5x Verlust in Folge nicht panisch werden, das ist normal."
+        />
+      </div>
+      <div className="p-4 space-y-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          <Pill label="Max Gewinn-Serie" value={`${stats.maxWin}T`} color="#10b981" sub={`Ø ${stats.avgWin.toFixed(1)}`} />
+          <Pill label="Max Verlust-Serie" value={`${stats.maxLoss}T`} color="#ef4444" sub={`Ø ${stats.avgLoss.toFixed(1)}`} />
+          <Pill label="Streak-Zyklen" value={stats.streakCount} color="#e2e8f0" />
+          <Pill label="WR nach 1 Loss" value={stats.condProb[1].rate != null ? stats.condProb[1].rate.toFixed(0) + '%' : '—'} color="#06b6d4" sub={`${stats.condProb[1].opps} Fälle`} />
+        </div>
+        <div className="grid grid-cols-4 gap-2">
+          {[1, 2, 3, 4].map(n => {
+            const cp = stats.condProb[n]
+            return (
+              <div key={n} className="rounded-lg border border-[#1f2937] bg-[#0d1117] p-2 text-center">
+                <div className="text-[10px] text-slate-500">Nach {n} Loss{n>1?'es':''}</div>
+                <div className={`text-sm font-mono font-bold ${
+                  cp.rate == null ? 'text-slate-700' : cp.rate >= 50 ? 'text-[#10b981]' : 'text-[#ef4444]'
+                }`}>
+                  {cp.rate != null ? cp.rate.toFixed(0) + '%' : 'n/a'}
+                </div>
+                <div className="text-[10px] text-slate-600">{cp.opps} Fälle</div>
+              </div>
+            )
+          })}
+        </div>
+        <p className="text-[11px] text-slate-500">
+          Wenn die WR nach Lossern systematisch von der Baseline abweicht, sind deine Trades nicht unabhängig — ein Hinweis auf Regime-Wechsel oder dein Verhalten.
+        </p>
+      </div>
+    </div>
+  )
+}
+
+/* ============================================================
+ * 5. WOCHENTAG × STUNDE HEATMAP
+ * ============================================================ */
+function HeatmapCard({ trades }) {
+  const { t } = useLanguage()
+  const { grid, weekdayLabels } = useMemo(() => buildWeekHourHeatmap(trades), [trades])
+  // find best/worst cells
+  const allCells = grid.flat()
+  const populated = allCells.filter(c => c.count > 0)
+  const maxPnl = Math.max(0, ...populated.map(c => c.avgPnl))
+  const minPnl = Math.min(0, ...populated.map(c => c.avgPnl))
+
+  function cellColor(c) {
+    if (!c.count) return '#0d1117'
+    if (c.avgPnl > 0) {
+      const intensity = maxPnl > 0 ? c.avgPnl / maxPnl : 0
+      return `rgba(16, 185, 129, ${0.15 + intensity * 0.7})`
+    } else if (c.avgPnl < 0) {
+      const intensity = minPnl < 0 ? c.avgPnl / minPnl : 0
+      return `rgba(239, 68, 68, ${0.15 + intensity * 0.7})`
+    }
+    return '#1f2937'
+  }
+
+  // active hours range (skip dead zones for compactness): show 0-23
+  return (
+    <div className="card">
+      <div className="card-header">
+        <SectionTitle
+          icon={CalendarIcon}
+          title={t('an.heatmap')}
+          subtitle="Wann öffnest du deine besten Trades? Tote Zonen sofort erkennbar."
+          color="#ec4899"
+          info="Heatmap nach Wochentag × Stunde (Eröffnungszeit deiner Trades). Grün = profitabel, Rot = Verluste. Hilft, deine echten Edge-Fenster zu finden — z.B. London-Open vs. Asia-Session. Tote Zonen (kaum Trades) sind oft Zeiten, in denen du gar nicht traden solltest."
+        />
+      </div>
+      <div className="p-4 space-y-2 overflow-x-auto">
+        <div className="inline-flex flex-col gap-1 min-w-full">
+          {/* Hour header */}
+          <div className="flex gap-0.5 pl-8">
+            {Array.from({ length: 24 }, (_, h) => (
+              <div key={h} className="w-6 text-[9px] text-center text-slate-600 font-mono">{h}</div>
+            ))}
+          </div>
+          {/* Day rows */}
+          {[1, 2, 3, 4, 5, 6, 0].map(day => (
+            <div key={day} className="flex items-center gap-0.5">
+              <div className="w-7 text-[10px] text-slate-500 font-medium">{weekdayLabels[day]}</div>
+              <div className="w-1" />
+              {grid[day].map(cell => (
+                <div
+                  key={cell.hour}
+                  className="w-6 h-6 rounded-sm flex items-center justify-center text-[8px] font-mono font-bold border border-[#1f2937]"
+                  style={{ backgroundColor: cellColor(cell), color: cell.count > 0 ? '#fff' : '#374151' }}
+                  title={cell.count > 0
+                    ? `${weekdayLabels[day]} ${cell.hour}:00\n${cell.count} Trades · WR ${cell.winRate?.toFixed(0)}% · Ø $${cell.avgPnl.toFixed(0)}`
+                    : 'Keine Trades'}
+                >
+                  {cell.count > 0 ? cell.count : ''}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+        <div className="flex items-center gap-3 mt-3 text-[10px] text-slate-500">
+          <span className="flex items-center gap-1">
+            <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: 'rgba(16,185,129,0.6)' }} />
+            Gewinnzone
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: 'rgba(239,68,68,0.6)' }} />
+            Verlustzone
+          </span>
+          <span className="text-slate-600">Zahl = Trade-Count</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ============================================================
+ * 6. MFE/MAE — Capture-Rate
+ * ============================================================ */
+function MfeMaeCard({ trades, mfeArchive, riskAmount }) {
+  const { t } = useLanguage()
+  const data = useMemo(() => buildMfeMaeAnalysis(trades, mfeArchive, riskAmount), [trades, mfeArchive, riskAmount])
+  const hasData = data.sampleSize > 0
+
+  if (!hasData) {
+    return (
+      <div className="card">
+        <div className="card-header">
+          <SectionTitle
+            icon={Activity}
+            title={t('an.mfe_mae')}
+            subtitle="Wie viel vom verfügbaren Gewinn nimmst du wirklich mit?"
+            color="#f97316"
+          />
+        </div>
+        <div className="p-5">
+          <div className="flex items-start gap-3 px-3 py-2.5 rounded-lg bg-[#f97316]/8 border border-[#f97316]/20 text-xs text-slate-300">
+            <Info size={14} className="text-[#f97316] flex-shrink-0 mt-0.5" />
+            <div className="leading-relaxed">
+              <p className="font-semibold text-[#f97316] mb-1">Datenerfassung läuft</p>
+              <p>
+                Das Backend zeichnet ab sofort den live P&L jeder offenen Position auf und merkt sich Maximum (MFE)
+                + Minimum (MAE) während der Trade-Laufzeit. Sobald die ersten Trades nach diesem Update geschlossen werden,
+                erscheint hier deine Capture-Rate.
+              </p>
+              <p className="text-slate-500 mt-2 font-mono text-[10px]">
+                Capture = realisierter Gewinn / MFE  ·  &lt; 40% = zu früh raus  ·  &gt; 80% = zu gierig
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  const captureColor = data.overallCapture == null ? '#6b7280'
+    : data.overallCapture >= 0.7 ? '#10b981'
+    : data.overallCapture >= 0.4 ? '#f59e0b'
+    : '#ef4444'
+  const verdict = data.overallCapture == null ? '—'
+    : data.overallCapture >= 0.8 ? 'Eventuell zu gierig'
+    : data.overallCapture >= 0.5 ? 'Solide'
+    : data.overallCapture >= 0.3 ? 'Lässt Geld liegen'
+    : 'Massiv zu früh raus'
+
+  return (
+    <div className="card">
+      <div className="card-header">
+        <SectionTitle
+          icon={Activity}
+          title={t('an.mfe_mae')}
+          subtitle={`Wie viel vom verfügbaren Peak-Gewinn realisierst du? · ${data.sampleSize} getrackte Trades`}
+          color="#f97316"
+          info="MFE = Maximum Favorable Excursion (wie weit ein Trade in die Gewinn-Richtung lief, bevor er geschlossen wurde). MAE = Maximum Adverse Excursion (wie tief er gegen dich lief). Zeigt, ob du Gewinner zu früh schließt (niedriger Capture-Rate) oder Verlierer zu lange hältst (großer MAE)."
+        />
+      </div>
+      <div className="p-4 space-y-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          <Pill
+            label="Capture-Rate"
+            value={data.overallCapture != null ? (data.overallCapture * 100).toFixed(0) + '%' : '—'}
+            color={captureColor}
+            sub={verdict}
+          />
+          <Pill
+            label="Realisiert"
+            value={'$' + data.totalRealized.toFixed(0)}
+            color="#10b981"
+          />
+          <Pill
+            label="MFE (Peak-Summe)"
+            value={'$' + data.totalMfe.toFixed(0)}
+            color="#3b82f6"
+          />
+          <Pill
+            label="Verschenkt"
+            value={'$' + data.giveBackTotal.toFixed(0)}
+            color="#ef4444"
+            sub="MFE − realisiert (nur Gewinner)"
+          />
+        </div>
+
+        {/* Scatter: Realized vs MFE */}
+        <ResponsiveContainer width="100%" height={240}>
+          <ScatterChart margin={{ top: 5, right: 10, bottom: 5, left: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+            <XAxis
+              type="number" dataKey="mfe" name="MFE"
+              tick={{ fill: '#6b7280', fontSize: 10 }} axisLine={false} tickLine={false}
+              tickFormatter={v => '$' + v.toFixed(0)}
+            />
+            <YAxis
+              type="number" dataKey="realized" name="Realisiert"
+              tick={{ fill: '#6b7280', fontSize: 10 }} axisLine={false} tickLine={false} width={50}
+              tickFormatter={v => '$' + v.toFixed(0)}
+            />
+            <ReferenceLine y={0} stroke="#374151" />
+            <Tooltip
+              cursor={{ stroke: '#374151', strokeDasharray: '3 3' }}
+              content={({ active, payload }) => {
+                if (!active || !payload?.length) return null
+                const d = payload[0].payload
+                const cap = d.mfe > 0 ? (d.realized / d.mfe) * 100 : null
+                return (
+                  <div className="bg-[#1a2233] border border-[#374151] rounded-lg px-3 py-2 text-xs">
+                    <p className="text-slate-300 font-semibold">{d.symbol}</p>
+                    <p className="font-mono text-[#3b82f6]">MFE: ${d.mfe.toFixed(2)}</p>
+                    <p className="font-mono text-[#ef4444]">MAE: ${d.mae.toFixed(2)}</p>
+                    <p className="font-mono" style={{ color: d.realized >= 0 ? '#10b981' : '#ef4444' }}>
+                      Realisiert: {d.realized >= 0 ? '+' : ''}${d.realized.toFixed(2)}
+                    </p>
+                    {cap != null && <p className="font-mono text-slate-400">Capture: {cap.toFixed(0)}%</p>}
+                  </div>
+                )
+              }}
+            />
+            <Scatter data={data.rows}>
+              {data.rows.map((d, i) => (
+                <Cell key={i} fill={d.realized >= 0 ? '#10b981' : '#ef4444'} fillOpacity={0.7} />
+              ))}
+            </Scatter>
+          </ScatterChart>
+        </ResponsiveContainer>
+        <p className="text-[11px] text-slate-500">
+          Jeder Punkt = ein abgeschlossener Trade. X = höchster unrealisierter Gewinn (MFE), Y = was du wirklich genommen hast.
+          Eine perfekte Diagonal-Linie wäre 100% Capture — alles darunter ist Geld, das du am Höhepunkt hattest und wieder hergegeben hast.
+        </p>
+      </div>
+    </div>
+  )
+}
+
+/* ============================================================
+ * 14. Best vs Worst Auto-Comparison
+ * ============================================================ */
+function BestVsWorstCard({ trades }) {
+  const { t } = useLanguage()
+  const data = useMemo(() => buildBestVsWorst(trades, 10), [trades])
+  if (!data) {
+    return (
+      <div className="card">
+        <div className="card-header">
+          <SectionTitle
+            icon={Crosshair}
+            title={t('an.best_vs_worst').split('—')[0].trim()}
+            subtitle="Was unterscheidet deine Top- von deinen Bottom-Trades?"
+            color="#06b6d4"
+          />
+        </div>
+        <div className="p-5 text-xs text-slate-500 flex items-center gap-2">
+          <Info size={14} />
+          <span>Mindestens 20 Trades nötig für aussagekräftigen Vergleich.</span>
+        </div>
+      </div>
+    )
+  }
+
+  const WEEKDAYS = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa']
+  const insights = []
+  if (data.top.avgHold > data.bottom.avgHold * 1.5) {
+    insights.push(`Top-Trades hältst du im Schnitt ${(data.top.avgHold / 60).toFixed(1)}h, Bottom-Trades nur ${(data.bottom.avgHold / 60).toFixed(1)}h — du steigst aus Verlierern zu schnell aus oder hältst Gewinner gut.`)
+  } else if (data.bottom.avgHold > data.top.avgHold * 1.5) {
+    insights.push(`Du hältst Verlierer (${(data.bottom.avgHold / 60).toFixed(1)}h) länger als Gewinner (${(data.top.avgHold / 60).toFixed(1)}h) — klassisches Loser-Riding-Muster.`)
+  }
+  if (data.top.topSymbol !== data.bottom.topSymbol) {
+    insights.push(`Stärkstes Symbol oben: ${data.top.topSymbol} (${data.top.topSymbolPct.toFixed(0)}%). Schwächstes: ${data.bottom.topSymbol} (${data.bottom.topSymbolPct.toFixed(0)}%).`)
+  }
+  if (data.top.topDay != null && data.bottom.topDay != null && data.top.topDay !== data.bottom.topDay) {
+    insights.push(`Gewinner-Cluster am ${WEEKDAYS[data.top.topDay]}, Verlierer-Cluster am ${WEEKDAYS[data.bottom.topDay]}.`)
+  }
+  if (data.bottom.avgVolume > data.top.avgVolume * 1.3) {
+    const pct = ((data.bottom.avgVolume / data.top.avgVolume - 1) * 100).toFixed(0)
+    insights.push(`Bei Verlierern handelst du ${pct}% größer als bei Gewinnern — Position-Sizing kippt invers zu deiner Edge.`)
+  }
+
+  function Block({ title, stats, accent }) {
+    return (
+      <div className="rounded-xl border p-4" style={{ borderColor: accent + '40', backgroundColor: accent + '08' }}>
+        <div className="flex items-center justify-between mb-3">
+          <span className="text-[11px] uppercase tracking-wider font-bold" style={{ color: accent }}>{title}</span>
+          <span className="font-mono font-bold text-sm" style={{ color: accent }}>
+            {stats.totalPnl >= 0 ? '+' : ''}${stats.totalPnl.toFixed(0)}
+          </span>
+        </div>
+        <div className="space-y-1.5 text-xs">
+          <div className="flex justify-between">
+            <span className="text-slate-500">Win Rate</span>
+            <span className="font-mono text-slate-300">{stats.winRate.toFixed(0)}%</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-slate-500">Ø Hold</span>
+            <span className="font-mono text-slate-300">{stats.avgHold < 60 ? stats.avgHold.toFixed(0) + 'm' : (stats.avgHold / 60).toFixed(1) + 'h'}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-slate-500">Top Symbol</span>
+            <span className="font-mono text-slate-300">{stats.topSymbol} ({stats.topSymbolPct.toFixed(0)}%)</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-slate-500">BUY %</span>
+            <span className="font-mono text-slate-300">{stats.typeBuyPct.toFixed(0)}%</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-slate-500">Bevorzugter Tag</span>
+            <span className="font-mono text-slate-300">{stats.topDay != null ? WEEKDAYS[stats.topDay] : '—'}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-slate-500">Ø Volumen</span>
+            <span className="font-mono text-slate-300">{stats.avgVolume.toFixed(2)}</span>
+          </div>
+          {stats.tags.length > 0 && (
+            <div className="pt-1">
+              <div className="text-[10px] text-slate-500 uppercase mb-1">Top Tags</div>
+              <div className="flex flex-wrap gap-1">
+                {stats.tags.map(([t, c]) => (
+                  <span key={t} className="text-[10px] px-1.5 py-0.5 rounded-full bg-[#8b5cf6]/15 text-[#8b5cf6]">{t} ({c})</span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="card">
+      <div className="card-header">
+        <SectionTitle
+          icon={Crosshair}
+          title={t('an.best_vs_worst')}
+          subtitle="Suche nach Mustern: was machen Gewinner anders als Verlierer?"
+          color="#06b6d4"
+          info="Vergleicht statistische Merkmale (Wochentag, Stunde, Symbol, Haltedauer, Tags) deiner Top-10 Gewinner mit deinen Top-10 Verlierern. Was haben deine besten Trades gemeinsam? Was teilen deine schlimmsten? Das ist Mustererkennung — keine Garantie, aber ein guter Startpunkt für Setup-Verfeinerung."
+        />
+      </div>
+      <div className="p-4 space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <Block title="Top 10 Gewinner" stats={data.top} accent="#10b981" />
+          <Block title="Bottom 10 Verlierer" stats={data.bottom} accent="#ef4444" />
+        </div>
+        {insights.length > 0 && (
+          <div className="space-y-2">
+            {insights.map((ins, i) => (
+              <div key={i} className="flex items-start gap-2 px-3 py-2 rounded-lg bg-[#06b6d4]/8 border border-[#06b6d4]/20 text-xs text-slate-300">
+                <Sparkles size={13} className="text-[#06b6d4] flex-shrink-0 mt-0.5" />
+                <span>{ins}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/* ============================================================
+ * 15. GitHub-Style Yearly Heatmap
+ * ============================================================ */
+function YearlyHeatmapCard({ trades }) {
+  const { t } = useLanguage()
+  const cells = useMemo(() => buildYearlyHeatmap(trades, 365), [trades])
+  const populated = cells.filter(c => c.count > 0)
+  const maxAbs = Math.max(0.01, ...populated.map(c => Math.abs(c.pnl)))
+
+  function cellColor(c) {
+    if (!c.count) return '#0d1117'
+    if (c.pnl > 0) {
+      const i = Math.min(1, Math.abs(c.pnl) / maxAbs)
+      return `rgba(16, 185, 129, ${0.18 + i * 0.7})`
+    } else if (c.pnl < 0) {
+      const i = Math.min(1, Math.abs(c.pnl) / maxAbs)
+      return `rgba(239, 68, 68, ${0.18 + i * 0.7})`
+    }
+    return '#1f2937'
+  }
+
+  // organize into weeks (columns of 7 days). Start with the first cell's weekday.
+  const firstDay = cells[0].dayOfWeek
+  const padStart = (firstDay + 6) % 7   // align to Monday-first
+  const grid = []
+  let currentWeek = Array(padStart).fill(null)
+  cells.forEach(c => {
+    const idxInWeek = (c.dayOfWeek + 6) % 7
+    if (currentWeek.length === 7) {
+      grid.push(currentWeek)
+      currentWeek = []
+    }
+    while (currentWeek.length < idxInWeek) currentWeek.push(null)
+    currentWeek.push(c)
+  })
+  if (currentWeek.length > 0) grid.push(currentWeek)
+
+  const positiveDays = populated.filter(c => c.pnl > 0).length
+  const negativeDays = populated.filter(c => c.pnl < 0).length
+
+  return (
+    <div className="card">
+      <div className="card-header">
+        <SectionTitle
+          icon={CalendarIcon}
+          title={t('an.yearly')}
+          subtitle={`Letzte 365 Tage · ${populated.length} Trading-Tage · ${positiveDays} grün / ${negativeDays} rot`}
+          color="#10b981"
+          info="GitHub-Style-Heatmap: jedes Kästchen = ein Tag, Farbintensität = Tages-P&L. Zeigt auf einen Blick deine Konsistenz übers Jahr, Lücken (Pausen), Phasen mit Häufung roter Tage, und ob du eher ein paar große Tage hast oder gleichmäßig grün bist."
+        />
+      </div>
+      <div className="p-4 overflow-x-auto">
+        <div className="flex gap-0.5">
+          {grid.map((week, wi) => (
+            <div key={wi} className="flex flex-col gap-0.5">
+              {week.map((cell, di) => (
+                <div
+                  key={di}
+                  className="w-3 h-3 rounded-sm"
+                  style={{ backgroundColor: cell ? cellColor(cell) : 'transparent' }}
+                  title={cell
+                    ? cell.count > 0
+                      ? `${cell.date}: ${cell.count} Trade${cell.count !== 1 ? 's' : ''}, ${cell.pnl >= 0 ? '+' : ''}$${cell.pnl.toFixed(2)}`
+                      : `${cell.date}: keine Trades`
+                    : ''}
+                />
+              ))}
+            </div>
+          ))}
+        </div>
+        <div className="flex items-center gap-3 mt-3 text-[10px] text-slate-500">
+          <span>Weniger</span>
+          <div className="flex gap-0.5">
+            {[0.2, 0.4, 0.6, 0.85].map(i => (
+              <div key={i} className="w-3 h-3 rounded-sm" style={{ backgroundColor: `rgba(16,185,129,${i})` }} />
+            ))}
+          </div>
+          <span>Mehr Gewinn</span>
+          <span className="ml-4">·</span>
+          <div className="flex gap-0.5">
+            {[0.2, 0.4, 0.6, 0.85].map(i => (
+              <div key={i} className="w-3 h-3 rounded-sm" style={{ backgroundColor: `rgba(239,68,68,${i})` }} />
+            ))}
+          </div>
+          <span>Mehr Verlust</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ============================================================
+ * 16. Volatility-Normalized Returns
+ * ============================================================ */
+function VolNormCard({ trades }) {
+  const { t } = useLanguage()
+  const rows = useMemo(() => buildVolatilityNormalized(trades), [trades])
+  if (!rows.length) return null
+  return (
+    <div className="card">
+      <div className="card-header">
+        <SectionTitle
+          icon={Scale}
+          title={t('an.vol_norm')}
+          subtitle="Welches Symbol bringt deine echte Edge — adjustiert für Streuung?"
+          color="#8b5cf6"
+          info="Sharpe-ähnliche Kennzahl pro Symbol: Durchschnittlicher P&L geteilt durch Standardabweichung der P&Ls. Belohnt konsistente Gewinne, bestraft hohe Volatilität. Ein Symbol mit +$100 Schnitt aber wilden $500-Swings ist schlechter als +$80 Schnitt mit $100-Streuung."
+        />
+      </div>
+      <div className="p-4">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-slate-500 border-b border-[#1f2937]">
+              <th className="text-left py-2">Symbol</th>
+              <th className="text-right py-2">Trades</th>
+              <th className="text-right py-2">Ø P&L</th>
+              <th className="text-right py-2">Std-Abw.</th>
+              <th className="text-right py-2">WR</th>
+              <th className="text-right py-2">Sharpe-like</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(r => (
+              <tr key={r.symbol} className="border-b border-[#1f2937]/50">
+                <td className="py-2 font-mono font-semibold text-slate-200">{r.symbol}</td>
+                <td className="text-right text-slate-400">{r.trades}</td>
+                <td className={`text-right font-mono ${r.mean >= 0 ? 'text-[#10b981]' : 'text-[#ef4444]'}`}>
+                  {r.mean >= 0 ? '+' : ''}${r.mean.toFixed(0)}
+                </td>
+                <td className="text-right font-mono text-slate-500">${r.std.toFixed(0)}</td>
+                <td className="text-right font-mono text-slate-400">{r.winRate.toFixed(0)}%</td>
+                <td className={`text-right font-mono font-bold ${
+                  r.sharpeLike >= 0.3 ? 'text-[#10b981]' : r.sharpeLike >= 0 ? 'text-[#f59e0b]' : 'text-[#ef4444]'
+                }`}>
+                  {r.sharpeLike.toFixed(2)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p className="text-[11px] text-slate-500 mt-3">
+          Sharpe-like = Ø P&L / Std-Abw. — Werte &gt; 0.3 bedeuten konsistente Edge, negativ = Roulette mit Verlust-Schlagseite.
+        </p>
+      </div>
+    </div>
+  )
+}
+
+/* ============================================================
+ * 17. Recovery Factor
+ * ============================================================ */
+function RecoveryCard({ trades, accountBalance }) {
+  const { t } = useLanguage()
+  const rf = useMemo(() => calcRecoveryFactor(trades, accountBalance || 10000), [trades, accountBalance])
+  if (rf.recoveryFactor == null) return null
+  const value = rf.recoveryFactor
+  const color = value >= 5 ? '#10b981' : value >= 3 ? '#22c55e' : value >= 1 ? '#f59e0b' : '#ef4444'
+  const verdict = value >= 5 ? 'Elite' : value >= 3 ? 'Stark' : value >= 1 ? 'Akzeptabel' : 'Schlecht'
+  return (
+    <div className="card">
+      <div className="card-header">
+        <SectionTitle
+          icon={ShieldCheck}
+          title={t('an.recovery')}
+          subtitle="Net-Profit ÷ Max-Drawdown — wie viel Edge pro Schmerz-Einheit?"
+          color="#10b981"
+          info="Recovery Factor = Gesamt-Gewinn geteilt durch maximalen Drawdown. Antwortet auf die Frage: 'Wie viel hast du verdient pro Dollar, den du zwischenzeitlich im Loch warst?' Werte >3 sind gut, >5 exzellent, <1 bedeutet dein DD war größer als dein Gewinn — riskante Strategie."
+        />
+      </div>
+      <div className="p-4 grid grid-cols-2 md:grid-cols-3 gap-2">
+        <Pill label="Recovery Factor" value={value.toFixed(2)} color={color} sub={verdict} />
+        <Pill label="Net P&L" value={(rf.totalPnl >= 0 ? '+' : '') + '$' + rf.totalPnl.toFixed(0)} color={rf.totalPnl >= 0 ? '#10b981' : '#ef4444'} />
+        <Pill label="Max Drawdown" value={'$' + rf.maxDd.toFixed(0)} color="#ef4444" sub={rf.maxDdPct.toFixed(1) + '% vom Konto'} />
+      </div>
+    </div>
+  )
+}
+
+/* ============================================================
+ * 18. Mistake Cost Analysis
+ * ============================================================ */
+function MistakeCostCard({ trades }) {
+  const { t } = useLanguage()
+  const data = useMemo(() => buildMistakeAnalysis(trades), [trades])
+  if (data.tradesWithMistakes === 0) {
+    return (
+      <div className="card">
+        <div className="card-header">
+          <SectionTitle
+            icon={Bug}
+            title={t('an.mistakes')}
+            subtitle="Was kosten dich deine schlechten Gewohnheiten?"
+            color="#ef4444"
+          />
+        </div>
+        <div className="p-5 text-xs text-slate-500 flex items-center gap-2">
+          <Info size={14} />
+          <span>Noch keine Trade mit Fehler-Tag versehen. Im Trade-Detail-Modal pro Trade die Fehler-Kategorien anhaken — diese Auswertung lebt auf, sobald Daten reinkommen.</span>
+        </div>
+      </div>
+    )
+  }
+  const wrDelta = data.cleanWinRate - (data.dirtyAvg >= 0 ? 0 : 0)   // not used, keep visual
+  return (
+    <div className="card">
+      <div className="card-header">
+        <SectionTitle
+          icon={Bug}
+          title={t('an.mistakes')}
+          subtitle={`${data.tradesWithMistakes} Trades mit Fehler-Tag · "saubere" Trades: ${data.cleanTrades}`}
+          color="#ef4444"
+          info="Auswertung deiner manuell vergebenen Fehler-Tags (z.B. 'FOMO', 'Stop zu eng', 'gegen Trend'). Zeigt pro Fehler-Typ: Häufigkeit, kumulierter P&L-Schaden und Win-Rate. Vergleich 'saubere' vs. 'fehlerhafte' Trades zeigt dir den echten Preis deiner Disziplin-Lücken."
+        />
+      </div>
+      <div className="p-4 space-y-4">
+        {/* Clean vs Dirty comparison */}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="rounded-xl border border-[#10b981]/40 bg-[#10b981]/8 p-3">
+            <div className="text-[11px] uppercase tracking-wider font-bold text-[#10b981] mb-1.5">Saubere Trades</div>
+            <div className="text-lg font-mono font-bold text-[#10b981]">
+              {data.cleanAvg >= 0 ? '+' : ''}${data.cleanAvg.toFixed(2)}
+            </div>
+            <div className="text-[10px] text-slate-500 mt-0.5">WR {data.cleanWinRate.toFixed(0)}% · {data.cleanTrades}T</div>
+          </div>
+          <div className="rounded-xl border border-[#ef4444]/40 bg-[#ef4444]/8 p-3">
+            <div className="text-[11px] uppercase tracking-wider font-bold text-[#ef4444] mb-1.5">Mit Fehler markiert</div>
+            <div className="text-lg font-mono font-bold text-[#ef4444]">
+              {data.dirtyAvg >= 0 ? '+' : ''}${data.dirtyAvg.toFixed(2)}
+            </div>
+            <div className="text-[10px] text-slate-500 mt-0.5">Realisiert: {data.realizedFromMistakes >= 0 ? '+' : ''}${data.realizedFromMistakes.toFixed(0)}</div>
+          </div>
+        </div>
+
+        {/* Per-mistake breakdown */}
+        <div>
+          <p className="text-[11px] text-slate-500 uppercase tracking-wider font-medium mb-2">Kosten pro Fehler-Kategorie</p>
+          <div className="space-y-1.5">
+            {data.rows.map(m => (
+              <div key={m.id} className="flex items-center gap-3 px-3 py-2 rounded-lg border border-[#1f2937] bg-[#0d1117]">
+                <span className="text-base">{m.emoji}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm text-slate-300 font-medium">{m.label}</div>
+                  <div className="text-[10px] text-slate-500 font-mono">
+                    {m.count}T · WR {m.winRate.toFixed(0)}% · Ø {m.avgPnl >= 0 ? '+' : ''}${m.avgPnl.toFixed(0)}
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className={`text-sm font-mono font-bold`} style={{ color: m.color }}>
+                    {m.totalCost.toFixed(0) === '0' ? '$0' : '$' + m.totalCost.toFixed(0)}
+                  </div>
+                  <div className="text-[10px] text-slate-600">Gesamt-Kosten</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ============================================================
+ * 19. Coach Mode — Weekly Report
+ * ============================================================ */
+function WeeklyReportCard({ trades }) {
+  const { t } = useLanguage()
+  const data = useMemo(() => buildWeeklyReport(trades), [trades])
+  const cur = data.current
+  const prev = data.previous
+  const positive = cur.pnl >= 0
+  const better   = data.pnlDelta >= 0
+  return (
+    <div className="card">
+      <div className="card-header">
+        <SectionTitle
+          icon={Award}
+          title={t('an.coach')}
+          subtitle={`Woche ab ${data.weekStart} · vs. Vorwoche`}
+          color="#3b82f6"
+          info="Wöchentlicher Mini-Coaching-Report: aktuelle Woche vs. Vorwoche bei P&L, Win-Rate, Trade-Anzahl, durchschnittlichem Risiko. Hilft, kurzfristige Trends zu erkennen, bevor sie zu Drawdown-Phasen werden — und zu sehen, was gerade besser läuft als sonst."
+        />
+      </div>
+      <div className="p-4 space-y-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          <Pill
+            label="Diese Woche P&L"
+            value={(positive ? '+' : '') + '$' + cur.pnl.toFixed(0)}
+            color={positive ? '#10b981' : '#ef4444'}
+            sub={`${cur.count} Trade${cur.count !== 1 ? 's' : ''}`}
+          />
+          <Pill
+            label="Δ vs Vorwoche"
+            value={(better ? '+' : '') + '$' + data.pnlDelta.toFixed(0)}
+            color={better ? '#10b981' : '#ef4444'}
+            sub={`${prev.count}T → ${cur.count}T`}
+          />
+          <Pill
+            label="Win Rate"
+            value={cur.winRate.toFixed(0) + '%'}
+            color={cur.winRate >= 50 ? '#10b981' : '#ef4444'}
+            sub={`Vorher: ${prev.winRate.toFixed(0)}%`}
+          />
+          <Pill
+            label="Fehler-Trades"
+            value={data.mistakeTrades}
+            color={data.mistakeTrades === 0 ? '#10b981' : '#f59e0b'}
+            sub={data.mistakeCost < 0 ? '$' + data.mistakeCost.toFixed(0) : '—'}
+          />
+        </div>
+
+        <div className="space-y-2">
+          {cur.best && (
+            <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-[#10b981]/8 border border-[#10b981]/20 text-xs">
+              <Trophy size={13} className="text-[#10b981] flex-shrink-0 mt-0.5" />
+              <span className="text-slate-300">
+                <strong className="text-[#10b981]">Bester Trade:</strong> {cur.best.symbol} {cur.best.type} →{' '}
+                <span className="font-mono font-bold text-[#10b981]">+${(cur.best.profit + (cur.best.commission || 0) + (cur.best.swap || 0)).toFixed(2)}</span>
+              </span>
+            </div>
+          )}
+          {cur.worst && cur.worst.profit < 0 && (
+            <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-[#ef4444]/8 border border-[#ef4444]/20 text-xs">
+              <AlertTriangle size={13} className="text-[#ef4444] flex-shrink-0 mt-0.5" />
+              <span className="text-slate-300">
+                <strong className="text-[#ef4444]">Größter Verlust:</strong> {cur.worst.symbol} {cur.worst.type} →{' '}
+                <span className="font-mono font-bold text-[#ef4444]">${(cur.worst.profit + (cur.worst.commission || 0) + (cur.worst.swap || 0)).toFixed(2)}</span>
+              </span>
+            </div>
+          )}
+          {data.topSymbol && data.topSymbol[1] > 0 && (
+            <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-[#3b82f6]/8 border border-[#3b82f6]/20 text-xs">
+              <Sparkles size={13} className="text-[#3b82f6] flex-shrink-0 mt-0.5" />
+              <span className="text-slate-300">
+                <strong className="text-[#3b82f6]">Stärke:</strong> {data.topSymbol[0]} (+${data.topSymbol[1].toFixed(0)})
+                {data.worstSymbol && data.worstSymbol[1] < 0 &&
+                  <> · <strong className="text-[#ef4444]">Schwäche:</strong> {data.worstSymbol[0]} (${data.worstSymbol[1].toFixed(0)})</>
+                }
+              </span>
+            </div>
+          )}
+          {data.mistakeTrades > 0 && (
+            <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-[#f59e0b]/8 border border-[#f59e0b]/20 text-xs">
+              <Bug size={13} className="text-[#f59e0b] flex-shrink-0 mt-0.5" />
+              <span className="text-slate-300">
+                <strong className="text-[#f59e0b]">Disziplin-Hinweis:</strong> {data.mistakeTrades} Trades mit Fehler-Tag —
+                Kosten ${Math.abs(data.mistakeCost).toFixed(0)}. Eliminiere das, und deine Woche wäre{' '}
+                <span className="font-mono font-bold text-[#10b981]">+${(cur.pnl - data.mistakeCost).toFixed(0)}</span>.
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ============================================================
+ * 7. ULCER INDEX
+ * ============================================================ */
+function UlcerCard({ trades, accountBalance }) {
+  const { t } = useLanguage()
+  const u = useMemo(() => calcUlcerIndex(trades, accountBalance || 10000), [trades, accountBalance])
+  if (!trades.length) return null
+  // qualitative scale
+  const ulcerLevel = u.ulcer < 2 ? 'gering' : u.ulcer < 5 ? 'moderat' : u.ulcer < 10 ? 'hoch' : 'kritisch'
+  const ulcerColor = u.ulcer < 2 ? '#10b981' : u.ulcer < 5 ? '#f59e0b' : u.ulcer < 10 ? '#f97316' : '#ef4444'
+  return (
+    <div className="card">
+      <div className="card-header">
+        <SectionTitle
+          icon={Heart}
+          title={t('an.ulcer')}
+          subtitle="Wie schmerzhaft waren deine Drawdowns — und wie lange unter Wasser?"
+          color="#ef4444"
+          info="Ulcer Index misst Tiefe UND Dauer von Drawdowns kombiniert — nicht nur den Tiefstpunkt, sondern wie lange du unter Wasser warst. Zwei Strategien mit gleichem Max-DD können sich enorm unterscheiden: 1 Tag tiefes Loch vs. 3 Monate flacher Schmerz. Niedriger ist besser."
+        />
+      </div>
+      <div className="p-4 grid grid-cols-2 md:grid-cols-4 gap-2">
+        <Pill label="Ulcer Index" value={u.ulcer.toFixed(2)} color={ulcerColor} sub={`Belastung: ${ulcerLevel}`} />
+        <Pill label="Max Drawdown" value={u.maxDD.toFixed(2) + '%'} color="#ef4444" />
+        <Pill label="Längste Underwater-Phase" value={`${u.longestUnderwaterDays.toFixed(0)}d`} color="#f97316" sub={`${u.longestUnderwaterTrades} Trades`} />
+        <Pill label="Aktuell unter Peak?" value={u.longestUnderwaterTrades > 0 ? 'ja' : 'nein'} color={u.longestUnderwaterTrades > 0 ? '#ef4444' : '#10b981'} />
+      </div>
+    </div>
+  )
+}
+
+/* ============================================================
+ * 8 + 9. RISK OF RUIN + KELLY
+ * ============================================================ */
+function RiskOfRuinCard({ trades, accountBalance }) {
+  const { t } = useLanguage()
+  const baseRiskPct = parseFloat(localStorage.getItem(RISK_KEY) || '1')
+  const [riskPct, setRiskPct] = useState(baseRiskPct)
+  const stats = useMemo(() => calcStats(trades), [trades])
+  const winRate     = stats.winRate / 100
+  const payoffRatio = stats.avgLoss > 0 ? stats.avgWin / stats.avgLoss : stats.avgWin > 0 ? 99 : 0
+  const ror = calcRiskOfRuin({ winRate, payoffRatio, riskPerTrade: riskPct / 100, ruinThreshold: 0.5 })
+  const kelly = calcKelly({ winRate, payoffRatio })
+  const kellyQuarter = kelly / 4
+  return (
+    <div className="card">
+      <div className="card-header">
+        <SectionTitle
+          icon={AlertTriangle}
+          title={t('an.ror')}
+          subtitle="Bei deiner WR & R-Ratio: wie viel darfst du wirklich riskieren?"
+          color="#f59e0b"
+          info="Risk of Ruin = Wahrscheinlichkeit, dass du dein Konto auf Null fährst (oder einen definierten Schmerz-Threshold reißt), gegeben deine aktuelle Win-Rate und durchschnittliche R-Ratio. Bei 1% Risiko pro Trade ist RoR meist <0,1% — bei 5% Risiko explodiert die Zahl. Kelly-Kriterium daneben zeigt das mathematisch optimale Risiko, das du aber praktisch halbieren solltest (Half-Kelly)."
+        />
+      </div>
+      <div className="p-4 space-y-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          <Pill label="Win Rate" value={(winRate * 100).toFixed(0) + '%'} color="#3b82f6" />
+          <Pill label="Avg-Win / Avg-Loss" value={payoffRatio.toFixed(2)} color="#8b5cf6" />
+          <Pill label="Kelly (voll)" value={kelly.toFixed(1) + '%'} color="#10b981" sub="Mathematisch optimal" />
+          <Pill label="Kelly / 4 (empfohlen)" value={kellyQuarter.toFixed(2) + '%'} color="#10b981" sub="Realitäts-Buffer" />
+        </div>
+        <div>
+          <label className="text-[11px] text-slate-500 block mb-1.5">
+            Risiko pro Trade simulieren: <span className="font-mono text-slate-300">{riskPct.toFixed(2)}%</span>
+          </label>
+          <input
+            type="range" min={0.1} max={10} step={0.1}
+            value={riskPct}
+            onChange={e => setRiskPct(Number(e.target.value))}
+            className="w-full accent-[#f59e0b]"
+          />
+        </div>
+        <div className="rounded-xl border p-3" style={{
+          borderColor: ror > 20 ? '#ef444460' : ror > 5 ? '#f59e0b60' : '#10b98160',
+          backgroundColor: ror > 20 ? '#ef44440a' : ror > 5 ? '#f59e0b0a' : '#10b9810a',
+        }}>
+          <div className="text-[10px] text-slate-500 uppercase tracking-wide">Risk of Ruin (50% Drawdown)</div>
+          <div className="flex items-baseline gap-2 mt-1">
+            <span className="text-3xl font-mono font-bold" style={{
+              color: ror > 20 ? '#ef4444' : ror > 5 ? '#f59e0b' : '#10b981',
+            }}>
+              {ror.toFixed(2)}%
+            </span>
+            <span className="text-[11px] text-slate-500">
+              Wahrscheinlichkeit, irgendwann 50% deines Accounts zu verlieren bei {riskPct.toFixed(1)}% pro Trade
+            </span>
+          </div>
+        </div>
+        {kelly === 0 && (
+          <p className="text-[11px] text-[#ef4444]">
+            ⚠ Aktuelle Edge ist nicht positiv (WR × R) — Kelly wäre 0. Keine Position-Sizing-Optimierung möglich, bis die Strategie profitabel wird.
+          </p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/* ============================================================
+ * 10. SEQUENTIAL BIAS (REVENGE TRADING)
+ * ============================================================ */
+function SequentialCard({ trades }) {
+  const { t } = useLanguage()
+  const s = useMemo(() => calcSequentialBias(trades), [trades])
+  if (!s) return null
+  const wrLossDelta = s.afterLoss.winRate - s.baseline.winRate
+  const wrWinDelta  = s.afterWin.winRate  - s.baseline.winRate
+  const revenge = wrLossDelta < -10 && s.afterLoss.count >= 5
+  return (
+    <div className="card">
+      <div className="card-header">
+        <SectionTitle
+          icon={Flame}
+          title={t('an.sequence')}
+          subtitle="Wie verändert sich dein nächster Trade je nach vorherigem Ergebnis?"
+          color="#ef4444"
+          info="Vergleicht Win-Rate und P&L deines nächsten Trades, abhängig vom Ergebnis des vorherigen. Statistisch sollten die Werte ähnlich sein (Trades sind unabhängig). Große Abweichungen sind ein Hinweis auf Tilt-Verhalten: nach Verlusten gehst du in Revenge-Mode, oder nach Gewinnen wirst du übermütig — beides emotional getriebene Edge-Killer."
+        />
+      </div>
+      <div className="p-4 space-y-3">
+        <div className="grid grid-cols-3 gap-2">
+          {[
+            { key: 'baseline',  label: 'Alle Trades',          data: s.baseline,   color: '#3b82f6' },
+            { key: 'afterWin',  label: 'Nach Gewinn',          data: s.afterWin,   color: '#10b981' },
+            { key: 'afterLoss', label: 'Nach Verlust',         data: s.afterLoss,  color: '#ef4444' },
+          ].map(({ key, label, data, color }) => {
+            const delta = key === 'afterLoss' ? wrLossDelta : key === 'afterWin' ? wrWinDelta : 0
+            return (
+              <div key={key} className="rounded-xl border p-3" style={{ borderColor: color + '30', backgroundColor: color + '08' }}>
+                <div className="text-[10px] uppercase tracking-wide font-semibold mb-1.5" style={{ color }}>{label}</div>
+                <div className="flex items-baseline gap-1">
+                  <span className="text-xl font-mono font-bold text-slate-200">{data.winRate.toFixed(0)}%</span>
+                  {key !== 'baseline' && Math.abs(delta) >= 1 && (
+                    <span className={`text-[10px] font-mono ${delta >= 0 ? 'text-[#10b981]' : 'text-[#ef4444]'}`}>
+                      {delta >= 0 ? '+' : ''}{delta.toFixed(0)}pp
+                    </span>
+                  )}
+                </div>
+                <div className="text-[10px] text-slate-500 mt-0.5">WR · {data.count} Trades</div>
+                <div className={`text-[11px] font-mono mt-1 ${data.avgPnl >= 0 ? 'text-[#10b981]' : 'text-[#ef4444]'}`}>
+                  Ø {data.avgPnl >= 0 ? '+' : ''}${data.avgPnl.toFixed(0)}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+        {revenge && (
+          <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-[#ef4444]/10 border border-[#ef4444]/30 text-xs text-slate-300">
+            <Flame size={14} className="text-[#ef4444] flex-shrink-0 mt-0.5" />
+            <span>
+              <strong className="text-[#ef4444]">Revenge-Trading-Muster:</strong> Nach Verlusten fällt deine WR um {Math.abs(wrLossDelta).toFixed(0)} Prozentpunkte.
+              Lege eine Cool-Down-Regel fest (kein Trade in den nächsten 30min nach Loss).
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/* ============================================================
+ * 11. TAG-COMBO MATRIX
+ * ============================================================ */
+function TagComboCard({ trades }) {
+  const { t } = useLanguage()
+  const { tags, matrix } = useMemo(() => buildTagComboMatrix(trades, 2), [trades])
+  if (tags.length < 2) {
+    return (
+      <div className="card">
+        <div className="card-header">
+          <SectionTitle
+            icon={Layers}
+            title={t('an.tag_matrix')}
+            subtitle="Welche Setup-Kombinationen sind dein Gold — welche dein Death-Zone?"
+            color="#8b5cf6"
+          />
+        </div>
+        <div className="p-5 text-xs text-slate-500 flex items-center gap-2">
+          <Info size={14} />
+          <span>Mindestens 2 unterschiedliche Tags nötig — taggle deine Trades konsequent (Setup-Typ, Session, Bias…), dann lebt diese Matrix auf.</span>
+        </div>
+      </div>
+    )
+  }
+
+  // colors based on avgPnl
+  const allValues = tags.flatMap(a => tags.map(b => matrix[a][b])).filter(Boolean).map(c => c.avgPnl)
+  const maxV = Math.max(0, ...allValues)
+  const minV = Math.min(0, ...allValues)
+  function cellBg(v) {
+    if (v == null) return '#0d1117'
+    if (v.avgPnl > 0) return `rgba(16, 185, 129, ${0.15 + (v.avgPnl / Math.max(maxV, 1)) * 0.6})`
+    if (v.avgPnl < 0) return `rgba(239, 68, 68, ${0.15 + (v.avgPnl / Math.min(minV, -1)) * 0.6})`
+    return '#1f2937'
+  }
+  return (
+    <div className="card">
+      <div className="card-header">
+        <SectionTitle
+          icon={Layers}
+          title={t('an.tag_matrix')}
+          subtitle="Welche Kombination performt? (Diagonale = einzelne Tags)"
+          color="#8b5cf6"
+          info="Matrix aller Setup-Tag-Paare: jede Zelle zeigt P&L und Trade-Anzahl, wenn beide Tags gleichzeitig vorhanden waren. Diagonale = einzelner Tag allein. Identifiziert Gold-Kombinationen (z.B. 'Trend' + 'Pullback') und Death-Zones (z.B. 'FOMO' + 'Counter-Trend')."
+        />
+      </div>
+      <div className="p-4 overflow-x-auto">
+        <table className="text-xs border-separate" style={{ borderSpacing: 2 }}>
+          <thead>
+            <tr>
+              <th className="w-24" />
+              {tags.map(t => (
+                <th key={t} className="text-[10px] text-slate-500 font-medium px-1 rotate-[-25deg] origin-left whitespace-nowrap pb-3">{t}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {tags.map(a => (
+              <tr key={a}>
+                <td className="text-[10px] text-slate-500 font-medium pr-2 text-right whitespace-nowrap">{a}</td>
+                {tags.map(b => {
+                  const cell = matrix[a][b]
+                  return (
+                    <td key={b}>
+                      <div
+                        className="w-12 h-10 rounded flex flex-col items-center justify-center"
+                        style={{ backgroundColor: cellBg(cell) }}
+                        title={cell ? `${a} × ${b}: ${cell.count}T · WR ${cell.winRate.toFixed(0)}% · Ø $${cell.avgPnl.toFixed(0)}` : 'Zu wenig Daten'}
+                      >
+                        {cell ? (
+                          <>
+                            <span className="text-[10px] font-mono font-bold text-white">
+                              {cell.avgPnl >= 0 ? '+' : ''}{cell.avgPnl.toFixed(0)}
+                            </span>
+                            <span className="text-[8px] text-slate-300">{cell.count}T</span>
+                          </>
+                        ) : (
+                          <span className="text-[10px] text-slate-700">—</span>
+                        )}
+                      </div>
+                    </td>
+                  )
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+/* ============================================================
+ * 12. CONSISTENCY
+ * ============================================================ */
+function ConsistencyCard({ trades }) {
+  const { t } = useLanguage()
+  const c = useMemo(() => calcConsistency(trades), [trades])
+  if (!c) return null
+  return (
+    <div className="card">
+      <div className="card-header">
+        <SectionTitle
+          icon={BarChart3}
+          title={t('an.consistency')}
+          subtitle="Stabile Returns oder Achterbahn?"
+          color="#10b981"
+          info="Coefficient of Variation deiner täglichen P&Ls: misst, wie konsistent deine Returns sind. Niedrig = gleichmäßige grüne Tage. Hoch = Achterbahn (großer Gewinntag, dann zwei rote, dann wieder ein Knaller). Prop-Firmen schauen genau hierauf — sie wollen Consistency, nicht Lottogewinne."
+        />
+      </div>
+      <div className="p-4 grid grid-cols-2 md:grid-cols-4 gap-2">
+        <Pill label="Monate gewinnend / verlierend" value={`${c.positiveMonths} / ${c.negativeMonths}`} color="#3b82f6" sub={`${c.monthCount} Monate gesamt`} />
+        <Pill label="Ø Monatsergebnis" value={(c.meanMonthly >= 0 ? '+' : '') + '$' + c.meanMonthly.toFixed(0)} color={c.meanMonthly >= 0 ? '#10b981' : '#ef4444'} />
+        <Pill label="Streuung (Std-Abw.)" value={'$' + c.stdMonthly.toFixed(0)} color="#f59e0b" sub={c.cv != null ? `CV: ${c.cv.toFixed(2)}` : ''} />
+        <Pill
+          label="Sharpe-like"
+          value={c.sharpe != null ? c.sharpe.toFixed(2) : '—'}
+          color={c.sharpe == null ? '#6b7280' : c.sharpe >= 1 ? '#10b981' : c.sharpe >= 0 ? '#f59e0b' : '#ef4444'}
+          sub={c.sharpe >= 1 ? 'Sehr konsistent' : c.sharpe >= 0.5 ? 'Akzeptabel' : c.sharpe >= 0 ? 'Volatil' : 'Sehr volatil'}
+        />
+      </div>
+    </div>
+  )
+}
+
+/* ============================================================
+ * SIZING-KONSISTENZ — Riskiere ich nach Verlusten mehr?
+ * ============================================================ */
+const SIZING_BUCKET_META = {
+  opening:      { label: 'Eröffnungs-Trade', color: '#3b82f6', tip: 'Erster Trade des Tages' },
+  afterWin:     { label: 'Nach Gewinn',      color: '#10b981', tip: 'Direkt nach einem grünen Trade' },
+  afterLoss:    { label: 'Nach Verlust',     color: '#f59e0b', tip: 'Direkt nach einem roten Trade' },
+  after2Loss:   { label: 'Nach 2+ Verlusten', color: '#ef4444', tip: 'Nach 2 oder mehr Verlierern in Folge' },
+  afterBigLoss: { label: 'Nach großem Verlust', color: '#ec4899', tip: 'Nach Verlust >1.5× durchschnittlicher Verlust' },
+}
+
+function SizingConsistencyCard({ trades }) {
+  const data = useMemo(() => buildSizingConsistency(trades), [trades])
+  if (!data) return null
+
+  const verdict = data.maxDeviation > 25
+    ? { color: '#ef4444', label: 'Stark inkonsistent', msg: `Bis zu ${data.maxDeviation.toFixed(0)}% Abweichung — du sizierst je nach Stimmung deutlich anders. Klassisches Tilt-/Übermut-Symptom.` }
+    : data.maxDeviation > 10
+      ? { color: '#f59e0b', label: 'Leicht inkonsistent', msg: `${data.maxDeviation.toFixed(0)}% Abweichung. Noch okay, aber im Auge behalten — Sizing sollte aus dem Plan kommen, nicht aus dem letzten Trade.` }
+      : { color: '#10b981', label: 'Konsistent', msg: `Nur ${data.maxDeviation.toFixed(0)}% Abweichung zwischen den Buckets. Du sizierst diszipliniert unabhängig von Vorgängern.` }
+
+  return (
+    <div className="card">
+      <div className="card-header">
+        <SectionTitle
+          icon={Scaling}
+          title="Sizing-Konsistenz"
+          subtitle={`Ø Position: ${data.overallAvgVolume.toFixed(2)} Lot · maximale Abweichung: ${data.maxDeviation.toFixed(0)}%`}
+          color="#ec4899"
+          info="Vergleicht deine durchschnittliche Position-Größe (Lot-Volumen) je nach Vor-Trade-Situation. Statistisch dürftest du immer gleich viel riskieren — wenn du nach Verlusten plötzlich größer oder kleiner sizierst, ist das emotionsgetrieben und untergräbt deine Edge. Größter Hebel: Sizing-Drift erklärt oft die schmerzhaftesten Drawdowns."
+        />
+      </div>
+      <div className="p-4 space-y-4">
+        {/* Verdict */}
+        <div
+          className="rounded-lg border p-3"
+          style={{ backgroundColor: verdict.color + '15', borderColor: verdict.color + '40' }}
+        >
+          <p className="text-[12px] font-semibold mb-1" style={{ color: verdict.color }}>{verdict.label}</p>
+          <p className="text-[12px] text-slate-300 leading-relaxed">{verdict.msg}</p>
+        </div>
+
+        {/* Buckets als Bars */}
+        <div className="space-y-2">
+          {data.buckets.filter(b => b.count > 0).map(b => {
+            const meta = SIZING_BUCKET_META[b.id]
+            const widthPct = data.overallAvgVolume > 0
+              ? Math.min(100, (b.avgVolume / (data.overallAvgVolume * 2)) * 100)
+              : 50
+            const devColor = Math.abs(b.deviationPct) > 25 ? '#ef4444' : Math.abs(b.deviationPct) > 10 ? '#f59e0b' : '#10b981'
+            return (
+              <div key={b.id} className="rounded-lg border border-[#1f2937] bg-[#0d1117] p-3">
+                <div className="flex items-center justify-between mb-1.5">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-[12px] font-semibold" style={{ color: meta.color }}>{meta.label}</span>
+                    <span className="text-[10px] text-slate-500">{b.count} Trade{b.count !== 1 ? 's' : ''}</span>
+                  </div>
+                  <div className="flex items-center gap-3 shrink-0">
+                    <span className="font-mono text-[12px] text-slate-300">{b.avgVolume.toFixed(2)} Lot</span>
+                    {b.count >= 3 && (
+                      <span className="font-mono text-[11px] font-semibold" style={{ color: devColor }}>
+                        {b.deviationPct >= 0 ? '+' : ''}{b.deviationPct.toFixed(0)}%
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="h-2 bg-[#1f2937] rounded-full overflow-hidden relative">
+                  <div className="h-full rounded-full" style={{ width: `${widthPct}%`, backgroundColor: meta.color, opacity: 0.7 }} />
+                  {/* Mittel-Linie als Referenz bei 50% */}
+                  <div className="absolute top-0 bottom-0 w-px bg-slate-500" style={{ left: '50%' }} title="Ø über alle Trades" />
+                </div>
+                <div className="flex justify-between mt-1 text-[10px] text-slate-600">
+                  <span>WR {b.winRate.toFixed(0)}%</span>
+                  <span className={b.pnl >= 0 ? 'text-[#10b981]' : 'text-[#ef4444]'}>
+                    {b.pnl >= 0 ? '+' : ''}${b.pnl.toFixed(0)}
+                  </span>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+        <p className="text-[11px] text-slate-500">
+          Senkrechter Strich = Durchschnitt aller Trades. Balken-Position zeigt Abweichung. Rot ab ±25%, Gelb ab ±10%.
+        </p>
+      </div>
+    </div>
+  )
+}
+
+/* ============================================================
+ * KONKURRIERENDE POSITIONEN — Korrelations-Cluster
+ * ============================================================ */
+function ConcurrentPositionsCard({ trades }) {
+  const data = useMemo(() => buildConcurrentPositions(trades), [trades])
+  if (!data) return null
+
+  const verdict = data.avgConcurrent < 0.5
+    ? { color: '#10b981', label: 'Sauber sequenziell', msg: `Im Schnitt nur ${data.avgConcurrent.toFixed(1)} weitere Position offen. ${data.soloTradesPct.toFixed(0)}% deiner Trades sind solo — sauberes, fokussiertes Trading ohne Cluster-Risiko.` }
+    : data.avgConcurrent < 2
+      ? { color: '#f59e0b', label: 'Moderate Überschneidung', msg: `Ø ${data.avgConcurrent.toFixed(1)} weitere Positionen offen, max. ${data.maxConcurrent}. Achte darauf, ob die Symbole korreliert sind — sonst multiplizierst du dein Risiko unbemerkt.` }
+      : { color: '#ef4444', label: 'Hohe Konzentration', msg: `Ø ${data.avgConcurrent.toFixed(1)} weitere Positionen — du hältst oft viel gleichzeitig. Wenn die Symbole korrelieren, hast du de facto 1 Trade mit ${data.maxConcurrent}× Risiko. Sehr unterschätzte Drawdown-Quelle.` }
+
+  return (
+    <div className="card">
+      <div className="card-header">
+        <SectionTitle
+          icon={Link2}
+          title="Konkurrierende Positionen"
+          subtitle={`Ø ${data.avgConcurrent.toFixed(1)} parallel offen · max. ${data.maxConcurrent} · ${data.soloTradesPct.toFixed(0)}% Solo-Trades`}
+          color="#06b6d4"
+          info="Misst, wie viele andere Positionen typischerweise gleichzeitig offen sind, wenn du einen neuen Trade öffnest. Wenn du 3 USD-Pairs gleichzeitig long bist, hast du eigentlich einen einzigen 'Dollar-Schwäche'-Trade mit 3× Risiko. Die Symbol-Paare unten zeigen, welche Kombinationen am häufigsten gleichzeitig laufen — Korrelations-Check empfohlen."
+        />
+      </div>
+      <div className="p-4 space-y-4">
+        <div
+          className="rounded-lg border p-3"
+          style={{ backgroundColor: verdict.color + '15', borderColor: verdict.color + '40' }}
+        >
+          <p className="text-[12px] font-semibold mb-1" style={{ color: verdict.color }}>{verdict.label}</p>
+          <p className="text-[12px] text-slate-300 leading-relaxed">{verdict.msg}</p>
+        </div>
+
+        {data.topPairs.length > 0 ? (
+          <div>
+            <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium mb-2">
+              Häufigste Symbol-Paare (gleichzeitig offen)
+            </p>
+            <div className="space-y-1.5">
+              {data.topPairs.map((p, i) => (
+                <div key={i} className="flex items-center justify-between gap-3 rounded-lg border border-[#1f2937] bg-[#0d1117] px-3 py-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="font-mono text-[12px] text-slate-200">{p.symbolA}</span>
+                    <span className="text-slate-600">×</span>
+                    <span className="font-mono text-[12px] text-slate-200">{p.symbolB}</span>
+                  </div>
+                  <div className="flex items-center gap-3 text-[11px] text-slate-500 shrink-0">
+                    <span><span className="font-mono text-slate-300">{p.count}</span>× überlappt</span>
+                    <span><span className="font-mono text-slate-300">{p.overlapHours.toFixed(1)}h</span> gemeinsam</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="text-[11px] text-slate-500 mt-3">
+              Tipp: Prüfe bei Top-Paaren die Korrelation (z.B. EURUSD/GBPUSD = ~0.85). Hohe positive Korrelation = effektive Risiko-Verdopplung.
+            </p>
+          </div>
+        ) : (
+          <p className="text-[12px] text-slate-500">Keine zeitlich überlappenden Trades — du tradest streng sequenziell.</p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/* ============================================================
+ * TRADING-FREQUENZ-TREND — Overtrading-Erkennung
+ * ============================================================ */
+function TradingFrequencyCard({ trades }) {
+  const data = useMemo(() => buildTradingFrequency(trades), [trades])
+  if (!data || !data.rows.length) return null
+
+  const verdict = data.overtradingFlag
+    ? { color: '#ef4444', label: 'Overtrading-Warnung', msg: `Deine Trade-Frequenz ist um ${data.freqTrendPct.toFixed(0)}% gestiegen, gleichzeitig fiel die Win-Rate um ${Math.abs(data.wrTrendPct).toFixed(1)} Punkte. Klassisches Muster: mehr Trades, schlechtere Qualität.` }
+    : data.freqTrendPct > 15
+      ? { color: '#f59e0b', label: 'Frequenz steigt', msg: `${data.freqTrendPct.toFixed(0)}% mehr Trades pro Tag — Win-Rate hält noch (${data.wrTrendPct >= 0 ? '+' : ''}${data.wrTrendPct.toFixed(1)} Pt). Wachsam bleiben, dass Quantität nicht Qualität ersetzt.` }
+      : data.freqTrendPct < -15
+        ? { color: '#3b82f6', label: 'Frequenz sinkt', msg: `${Math.abs(data.freqTrendPct).toFixed(0)}% weniger Trades. Selektiver geworden oder Phase mit weniger Setups — Win-Rate-Veränderung: ${data.wrTrendPct >= 0 ? '+' : ''}${data.wrTrendPct.toFixed(1)} Pt.` }
+        : { color: '#10b981', label: 'Stabile Frequenz', msg: `Trade-Anzahl konstant (±${Math.abs(data.freqTrendPct).toFixed(0)}%). Solide Routine — Disziplin ist sichtbar.` }
+
+  return (
+    <div className="card">
+      <div className="card-header">
+        <SectionTitle
+          icon={Zap}
+          title="Trading-Frequenz-Trend"
+          subtitle={`Ø ${data.avgTradesPerDay.toFixed(1)} Trades pro Tag · ${data.rows.length} Trading-Tage`}
+          color="#f97316"
+          info="Anzahl Trades pro Tag mit 7-Tage-Rolling-Average und gleichzeitiger Win-Rate. Klassisches Overtrading-Muster: Frequenz steigt + Win-Rate fällt → du gönnst dir nicht mehr nur die A-Setups, sondern hängst auch B- und C-Setups dran. Frühindikator für Tilt oder Boredom-Trading."
+        />
+      </div>
+      <div className="p-4 space-y-3">
+        <div
+          className="rounded-lg border p-3 flex items-center justify-between gap-3"
+          style={{ backgroundColor: verdict.color + '15', borderColor: verdict.color + '40' }}
+        >
+          <div className="min-w-0">
+            <p className="text-[12px] font-semibold mb-0.5" style={{ color: verdict.color }}>{verdict.label}</p>
+            <p className="text-[12px] text-slate-300 leading-relaxed">{verdict.msg}</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2 text-[11px]">
+          <div className="rounded-lg border border-[#1f2937] bg-[#0d1117] p-2.5">
+            <p className="text-slate-500 uppercase tracking-wide text-[10px] font-medium mb-1">Erste Hälfte</p>
+            <div className="flex items-baseline gap-2">
+              <span className="font-mono text-sm font-semibold text-slate-200">{data.firstHalfFreq.toFixed(1)}</span>
+              <span className="text-slate-500 text-[10px]">Trades/Tag</span>
+            </div>
+            <p className="text-slate-500 mt-1">WR: <span className="font-mono text-slate-300">{data.firstHalfWR.toFixed(0)}%</span></p>
+          </div>
+          <div className="rounded-lg border border-[#1f2937] bg-[#0d1117] p-2.5">
+            <p className="text-slate-500 uppercase tracking-wide text-[10px] font-medium mb-1">Zweite Hälfte</p>
+            <div className="flex items-baseline gap-2">
+              <span className="font-mono text-sm font-semibold text-slate-200">{data.secondHalfFreq.toFixed(1)}</span>
+              <span className="text-slate-500 text-[10px]">Trades/Tag</span>
+            </div>
+            <p className="text-slate-500 mt-1">WR: <span className="font-mono text-slate-300">{data.secondHalfWR.toFixed(0)}%</span></p>
+          </div>
+        </div>
+
+        <ResponsiveContainer width="100%" height={240}>
+          <ComposedChart data={data.rows} margin={{ top: 5, right: 5, bottom: 0, left: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+            <XAxis
+              dataKey="date"
+              tick={{ fill: '#6b7280', fontSize: 10 }}
+              axisLine={false}
+              tickLine={false}
+              interval="preserveStartEnd"
+              tickFormatter={d => d.slice(5)}
+            />
+            <YAxis yAxisId="left" tick={{ fill: '#6b7280', fontSize: 10 }} axisLine={false} tickLine={false} width={35} />
+            <YAxis yAxisId="right" orientation="right" tick={{ fill: '#6b7280', fontSize: 10 }} axisLine={false} tickLine={false} width={40} unit="%" domain={[0, 100]} />
+            <Tooltip
+              content={({ active, payload, label }) => {
+                if (!active || !payload?.length) return null
+                const d = payload[0].payload
+                return (
+                  <div className="bg-[#1a2233] border border-[#374151] rounded-lg px-3 py-2 text-xs">
+                    <p className="text-slate-300 font-semibold">{label}</p>
+                    <p className="text-[#f97316] font-mono">{d.trades} Trade{d.trades !== 1 ? 's' : ''} (Ø 7T: {d.rollingFreq.toFixed(1)})</p>
+                    <p className="text-[#3b82f6] font-mono">WR-Tag: {d.winRate.toFixed(0)}% · WR-7T: {d.rollingWinRate.toFixed(0)}%</p>
+                  </div>
+                )
+              }}
+            />
+            <Bar yAxisId="left" dataKey="trades" fill="#f97316" fillOpacity={0.35} radius={[3, 3, 0, 0]} />
+            <Line yAxisId="left" type="monotone" dataKey="rollingFreq" stroke="#f97316" strokeWidth={2} dot={false} />
+            <Line yAxisId="right" type="monotone" dataKey="rollingWinRate" stroke="#3b82f6" strokeWidth={2} dot={false} strokeDasharray="4 4" />
+          </ComposedChart>
+        </ResponsiveContainer>
+        <p className="text-[11px] text-slate-500">
+          Orange = Trades/Tag (Balken + 7-Tage-Linie) · Blau gestrichelt = 7-Tage-Win-Rate (rechte Achse). Wenn Orange steigt UND Blau fällt: Overtrading-Verdacht.
+        </p>
+      </div>
+    </div>
+  )
+}
+
+/* ============================================================
+ * HOLD-DURATION TREND — Ø Haltedauer pro Tag
+ * ============================================================ */
+const HOLD_RANGES = [
+  { id: 'month', label: 'Monat', days: 30 },
+  { id: 'year',  label: 'Jahr',  days: 365 },
+  { id: 'all',   label: 'Gesamt', days: null },
+]
+
+function HoldRangeToggle({ range, setRange }) {
+  return (
+    <div className="flex items-center gap-0.5 bg-[#0d1117] border border-[#1f2937] rounded-lg p-0.5">
+      {HOLD_RANGES.map(r => (
+        <button
+          key={r.id}
+          onClick={() => setRange(r.id)}
+          className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors
+            ${range === r.id
+              ? 'bg-[#06b6d4]/15 text-[#06b6d4] border border-[#06b6d4]/30'
+              : 'text-slate-500 hover:text-slate-300'}`}
+        >
+          {r.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function HoldDurationTrendCard({ trades }) {
+  const [range, setRange] = useState('all')
+
+  const filteredTrades = useMemo(() => {
+    const cfg = HOLD_RANGES.find(r => r.id === range)
+    if (!cfg?.days) return trades
+    const cutoff = Date.now() - cfg.days * 86_400_000
+    return trades.filter(t => t.closeTime && new Date(t.closeTime).getTime() >= cutoff)
+  }, [trades, range])
+
+  const data = useMemo(() => buildAvgHoldByDay(filteredTrades), [filteredTrades])
+  if (!data.rows.length) {
+    return (
+      <div className="card">
+        <div className="card-header">
+          <SectionTitle
+            icon={Clock}
+            title="Ø Haltedauer pro Tag"
+            subtitle="Keine Trades im gewählten Zeitraum"
+            color="#06b6d4"
+          />
+        </div>
+        <div className="p-4 flex items-center justify-between">
+          <HoldRangeToggle range={range} setRange={setRange} />
+          <p className="text-xs text-slate-500">Wähle einen anderen Zeitraum.</p>
+        </div>
+      </div>
+    )
+  }
+
+  const trendUp     = data.trendPct > 5
+  const trendDown   = data.trendPct < -5
+  const trendColor  = trendUp ? '#f59e0b' : trendDown ? '#3b82f6' : '#10b981'
+  const trendLabel  = trendUp
+    ? `Haltedauer ist um ${Math.abs(data.trendPct).toFixed(0)}% gestiegen — du hältst länger als früher.`
+    : trendDown
+      ? `Haltedauer ist um ${Math.abs(data.trendPct).toFixed(0)}% gesunken — du gehst schneller raus.`
+      : `Haltedauer ist konstant geblieben (±${Math.abs(data.trendPct).toFixed(0)}%).`
+
+  return (
+    <div className="card">
+      <div className="card-header">
+        <SectionTitle
+          icon={Clock}
+          title="Ø Haltedauer pro Tag"
+          subtitle={`${data.rows.length} Trading-Tage · Schnitt insgesamt: ${formatDuration(data.overallAvg)}`}
+          color="#06b6d4"
+          info="Durchschnittliche Haltedauer aller Trades pro Trading-Tag, plus 7-Tage-Rolling-Average (geglättete Linie) zur Trend-Erkennung. Hilft zu sehen, ob du im Laufe der Zeit deine Trades länger laufen lässt (mehr Geduld) oder immer schneller raus gehst (Angst/Ungeduld) — beides ist verhaltens-relevant für deine Edge."
+        />
+      </div>
+      <div className="p-4 space-y-3">
+        {/* Zeit-Filter */}
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] text-slate-500">Zeitraum:</span>
+          <HoldRangeToggle range={range} setRange={setRange} />
+          <span className="text-[11px] text-slate-600 ml-auto">{filteredTrades.length} Trades</span>
+        </div>
+
+        {/* Trend-Statement */}
+        <div
+          className="rounded-lg border p-3 flex items-center justify-between gap-3"
+          style={{ backgroundColor: trendColor + '15', borderColor: trendColor + '40' }}
+        >
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="text-[11px] text-slate-500 uppercase tracking-wider font-medium">Erste Hälfte</div>
+            <div className="font-mono text-sm font-semibold text-slate-200">{formatDuration(data.firstHalfAvg)}</div>
+            <div className="text-slate-600">→</div>
+            <div className="text-[11px] text-slate-500 uppercase tracking-wider font-medium">Zweite Hälfte</div>
+            <div className="font-mono text-sm font-semibold text-slate-200">{formatDuration(data.secondHalfAvg)}</div>
+          </div>
+          <div className="font-mono text-sm font-bold shrink-0" style={{ color: trendColor }}>
+            {data.trendPct >= 0 ? '+' : ''}{data.trendPct.toFixed(1)}%
+          </div>
+        </div>
+        <p className="text-[12px] text-slate-400">{trendLabel}</p>
+
+        {/* Chart */}
+        <ResponsiveContainer width="100%" height={260}>
+          <ComposedChart data={data.rows} margin={{ top: 5, right: 5, bottom: 0, left: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+            <XAxis
+              dataKey="date"
+              tick={{ fill: '#6b7280', fontSize: 10 }}
+              axisLine={false}
+              tickLine={false}
+              interval="preserveStartEnd"
+              tickFormatter={d => d.slice(5)}
+            />
+            <YAxis
+              tick={{ fill: '#6b7280', fontSize: 10 }}
+              axisLine={false}
+              tickLine={false}
+              width={55}
+              tickFormatter={v => formatDuration(v)}
+            />
+            <Tooltip
+              content={({ active, payload, label }) => {
+                if (!active || !payload?.length) return null
+                const day = payload[0].payload
+                return (
+                  <div className="bg-[#1a2233] border border-[#374151] rounded-lg px-3 py-2 text-xs">
+                    <p className="text-slate-300 font-semibold">{label}</p>
+                    <p className="text-[#06b6d4] font-mono">Tag-Ø: {formatDuration(day.avgMinutes)}</p>
+                    <p className="text-[#f59e0b] font-mono">7-Tage-Ø: {formatDuration(day.rolling7)}</p>
+                    <p className="text-slate-500 text-[11px] mt-1">{day.count} Trade{day.count !== 1 ? 's' : ''}</p>
+                  </div>
+                )
+              }}
+            />
+            <ReferenceLine y={data.overallAvg} stroke="#475569" strokeDasharray="4 4" label={{ value: 'Gesamt-Ø', fill: '#64748b', fontSize: 10, position: 'right' }} />
+            <Bar dataKey="avgMinutes" fill="#06b6d4" fillOpacity={0.35} radius={[3, 3, 0, 0]} />
+            <Line type="monotone" dataKey="rolling7" stroke="#f59e0b" strokeWidth={2} dot={false} />
+          </ComposedChart>
+        </ResponsiveContainer>
+        <p className="text-[11px] text-slate-500">
+          Türkise Balken = Tages-Durchschnitt · Orange Linie = 7-Tage-Rolling-Average (geglättet) · Graue Linie = Gesamt-Schnitt aller Trades.
+        </p>
+      </div>
+    </div>
+  )
+}
+
+/* ============================================================
+ * AI COACH — Aggregierte Insights
+ * ============================================================ */
+const SEVERITY_STYLE = {
+  good: { color: '#10b981', bg: '#10b98115', border: '#10b98140', label: 'Stark' },
+  warn: { color: '#f59e0b', bg: '#f59e0b15', border: '#f59e0b40', label: 'Achtung' },
+  bad:  { color: '#ef4444', bg: '#ef444415', border: '#ef444440', label: 'Risiko' },
+  tip:  { color: '#3b82f6', bg: '#3b82f615', border: '#3b82f640', label: 'Hinweis' },
+}
+
+function buildCoachNarrative(insights, totalTrades) {
+  if (!insights.length) return null
+  const good = insights.filter(i => i.severity === 'good')
+  const bad  = insights.filter(i => i.severity === 'bad' || i.severity === 'warn')
+  const tips = insights.filter(i => i.severity === 'tip')
+
+  const intro = `Ich habe deine ${totalTrades} abgeschlossenen Trades durch alle Analyse-Module geschickt. Hier mein Eindruck:`
+
+  let positive = ''
+  if (good.length) {
+    const headlines = good.map(g => g.title.toLowerCase()).join(', ')
+    positive = `**Was du richtig machst:** ${good.map(g => g.message).join(' ')} Insgesamt ${good.length === 1 ? 'ein klarer Lichtblick' : good.length + ' Lichtblicke'} — bleib bei diesen Mustern (${headlines}).`
+  } else {
+    positive = `**Was du richtig machst:** Auf den großen Kennzahlen ragt aktuell nichts heraus — das ist kein Drama, aber auch kein Polster. Konzentriere dich darauf, mindestens eine Stärke auszubauen, bevor du an mehreren Hebeln gleichzeitig schraubst.`
+  }
+
+  let critical = ''
+  if (bad.length) {
+    critical = `**Was dich aktuell Geld kostet:** ${bad.map(b => b.message).join(' ')} Wenn du diese Woche an einer Sache arbeiten würdest, dann an der ersten Position oben — dort steckt der größte Hebel.`
+  } else {
+    critical = `**Was dich aktuell Geld kostet:** Keine roten Flaggen auf den Hauptmetriken. Achtung: das ist eine Momentaufnahme — kleine Stichproben können Risiken kaschieren. Bleib bei striktem Risk-Management.`
+  }
+
+  let outlook = ''
+  if (tips.length) {
+    outlook = `**Zum Weiterdenken:** ${tips.map(t => t.message).join(' ')}`
+  }
+
+  return [intro, positive, critical, outlook].filter(Boolean).join('\n\n')
+}
+
+function renderNarrative(text) {
+  // Sehr leichtgewichtiger Markdown-Parser nur für **fett**.
+  return text.split('\n\n').map((para, i) => {
+    const parts = para.split(/(\*\*[^*]+\*\*)/g)
+    return (
+      <p key={i} className="text-[13px] text-slate-300 leading-relaxed">
+        {parts.map((p, j) => {
+          if (p.startsWith('**') && p.endsWith('**')) {
+            return <strong key={j} className="text-white font-semibold">{p.slice(2, -2)}</strong>
+          }
+          return <span key={j}>{p}</span>
+        })}
+      </p>
+    )
+  })
+}
+
+function CoachCard({ trades, accountBalance, mfeArchive }) {
+  const insights = useMemo(() => {
+    const stats = calcStats(trades)
+    const pareto = buildParetoContribution(trades)
+    const streak = buildStreakStats(trades)
+    const sequence = calcSequentialBias(trades)
+    const consistency = calcConsistency(trades)
+    const recovery = calcRecoveryFactor(trades, accountBalance || 10000)
+    const mfeMae = buildMfeMaeAnalysis(trades, mfeArchive || {})
+    const wr = stats.winRate / 100
+    const payoff = stats.avgLoss > 0 ? stats.avgWin / stats.avgLoss : 0
+    const riskPct = parseFloat(localStorage.getItem(RISK_KEY) || '1') / 100
+    const rorPct = calcRiskOfRuin({ winRate: wr, payoffRatio: payoff, riskPerTrade: riskPct })
+    const ror = { ror: rorPct / 100 }
+    return buildCoachInsights(trades, { stats, pareto, streak, mfeMae, sequence, consistency, recovery, ror })
+  }, [trades, accountBalance, mfeArchive])
+
+  const narrative = useMemo(() => buildCoachNarrative(insights, trades.length), [insights, trades.length])
+
+  const counts = useMemo(() => {
+    const c = { good: 0, warn: 0, bad: 0, tip: 0 }
+    insights.forEach(i => { c[i.severity] = (c[i.severity] || 0) + 1 })
+    return c
+  }, [insights])
+
+  return (
+    <div className="card">
+      <div className="card-header">
+        <SectionTitle
+          icon={Sparkles}
+          title="AI-Coach"
+          subtitle={`${insights.length} Insights · ${counts.good} stark · ${counts.warn + counts.bad} kritisch · ${counts.tip} Hinweise`}
+          color="#8b5cf6"
+          info="Automatisch generierte Einschätzung deiner Performance über alle Metriken: was läuft gut, wo lauert Risiko, wo gibt es konkrete Verbesserungs-Hebel. Schwellwerte basieren auf etablierten Trading-Statistik-Standards (Profit-Faktor, R-Ratio, Recovery Factor, Risk of Ruin). Keine Glaskugel — datengetriebene Hypothesen, die du in deinem nächsten Trade-Plan prüfen kannst."
+        />
+      </div>
+      <div className="p-4 space-y-4">
+        {insights.length === 0 ? (
+          <p className="text-sm text-slate-500">Zu wenige Trades für eine fundierte Einschätzung — mindestens 10 abgeschlossene Trades helfen.</p>
+        ) : (
+          <>
+            {/* Narrative — der Coach erzählt */}
+            {narrative && (
+              <div className="rounded-xl border border-[#8b5cf6]/30 bg-[#8b5cf6]/5 p-4 space-y-3">
+                {renderNarrative(narrative)}
+              </div>
+            )}
+
+            {/* Kernpunkte als kompakte Severity-Pills */}
+            <div>
+              <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium mb-2">Kernpunkte</p>
+              <div className="flex flex-wrap gap-2">
+                {insights.map((ins, i) => {
+                  const s = SEVERITY_STYLE[ins.severity] || SEVERITY_STYLE.tip
+                  return (
+                    <div
+                      key={i}
+                      className="inline-flex items-center gap-2 rounded-full pl-1 pr-3 py-1 border"
+                      style={{ backgroundColor: s.bg, borderColor: s.border }}
+                      title={ins.message}
+                    >
+                      <span
+                        className="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider"
+                        style={{ backgroundColor: s.color, color: '#0d1117' }}
+                      >
+                        {s.label}
+                      </span>
+                      <span className="text-[12px] font-medium" style={{ color: s.color }}>{ins.title}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/* ============================================================
+ * MAIN PAGE
+ * ============================================================ */
+export default function AnalysePage() {
+  const { effectiveTrades } = useTrades()
+  const { accountBalance }  = usePrivacyMode()
+  const { mfeMae }          = useLiveSync()
+  const { t }               = useLanguage()
+  const trades = useMemo(() => effectiveTrades.filter(t => t.closeTime), [effectiveTrades])
+
+  const riskPct = parseFloat(localStorage.getItem(RISK_KEY) || '1')
+  const riskAmount = (accountBalance || 10000) * (riskPct / 100)
+  const mfeArchive = mfeMae?.archive || {}
+
+  if (!trades.length) {
+    return (
+      <div className="p-6">
+        <h1 className="text-xl font-bold text-white mb-2">{t('an.title')}</h1>
+        <p className="text-sm text-slate-500">{t('an.empty')}</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="p-6 space-y-6">
+      <div>
+        <h1 className="text-xl font-bold text-white">{t('an.title')}</h1>
+        <p className="text-sm text-slate-500 mt-0.5">
+          {t('an.subtitle', { count: 12, trades: trades.length })}
+        </p>
+      </div>
+
+      {/* AI Coach — ganz oben für schnellen Überblick */}
+      <CoachCard trades={trades} accountBalance={accountBalance} mfeArchive={mfeArchive} />
+
+      {/* Prognose + Coach */}
+      <ForecastCard trades={trades} accountBalance={accountBalance} />
+      <WeeklyReportCard trades={trades} />
+
+      {/* Jahres-Heatmap */}
+      <YearlyHeatmapCard trades={trades} />
+
+      {/* Edge */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        <ParetoCard trades={trades} />
+        <WhatIfCard trades={trades} />
+      </div>
+      <HoldTimeScatterCard trades={trades} riskAmount={riskAmount} />
+      <HoldDurationTrendCard trades={trades} />
+
+      {/* Best vs Worst */}
+      <BestVsWorstCard trades={trades} />
+
+      {/* Verhalten */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        <StreakStatsCard trades={trades} />
+        <SequentialCard trades={trades} />
+      </div>
+      <SizingConsistencyCard trades={trades} />
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        <ConcurrentPositionsCard trades={trades} />
+        <TradingFrequencyCard trades={trades} />
+      </div>
+      <HeatmapCard trades={trades} />
+
+      {/* MFE/MAE + Fehler */}
+      <MfeMaeCard trades={trades} mfeArchive={mfeArchive} riskAmount={riskAmount} />
+      <MistakeCostCard trades={trades} />
+
+      {/* Risiko */}
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+        <UlcerCard trades={trades} accountBalance={accountBalance} />
+        <RecoveryCard trades={trades} accountBalance={accountBalance} />
+        <ConsistencyCard trades={trades} />
+      </div>
+      <RiskOfRuinCard trades={trades} accountBalance={accountBalance} />
+
+      {/* Mustererkennung */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        <TagComboCard trades={trades} />
+        <VolNormCard trades={trades} />
+      </div>
+    </div>
+  )
+}

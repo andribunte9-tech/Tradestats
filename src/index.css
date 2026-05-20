@@ -1,0 +1,116 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html, body, #root {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    background-color: #080c14;
+    color: #f1f5f9;
+    font-family: 'Inter', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #0d1117;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #1f2937;
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #374151;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-[#111827] border border-[#1f2937] rounded-xl;
+  }
+
+  .card-header {
+    @apply px-5 py-4 border-b border-[#1f2937] flex items-center justify-between;
+  }
+
+  .btn-primary {
+    @apply bg-[#10b981] hover:bg-[#059669] text-white font-medium px-4 py-2 rounded-lg
+           transition-colors duration-150 text-sm flex items-center gap-2;
+  }
+
+  .btn-secondary {
+    @apply bg-[#1f2937] hover:bg-[#374151] text-slate-300 font-medium px-4 py-2 rounded-lg
+           transition-colors duration-150 text-sm flex items-center gap-2;
+  }
+
+  .btn-danger {
+    @apply bg-[#ef4444]/10 hover:bg-[#ef4444]/20 text-[#ef4444] font-medium px-4 py-2 rounded-lg
+           transition-colors duration-150 text-sm flex items-center gap-2 border border-[#ef4444]/20;
+  }
+
+  .input {
+    @apply bg-[#0d1117] border border-[#1f2937] rounded-lg px-3 py-2 text-sm text-slate-200
+           focus:outline-none focus:border-[#374151] focus:ring-1 focus:ring-[#374151]
+           placeholder-slate-600 transition-colors;
+  }
+
+  .select {
+    @apply bg-[#0d1117] border border-[#1f2937] rounded-lg px-3 py-2 text-sm text-slate-200
+           focus:outline-none focus:border-[#374151] focus:ring-1 focus:ring-[#374151]
+           transition-colors cursor-pointer;
+  }
+
+  .tag {
+    @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium;
+  }
+
+  .profit {
+    @apply text-[#10b981] font-mono;
+  }
+
+  .loss {
+    @apply text-[#ef4444] font-mono;
+  }
+
+  .stat-card {
+    @apply card p-5 flex flex-col gap-1;
+  }
+
+  .modal-overlay {
+    @apply fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4;
+  }
+
+  .modal-content {
+    @apply bg-[#111827] border border-[#1f2937] rounded-2xl shadow-2xl w-full;
+  }
+}
+
+/* Custom animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.fade-in {
+  animation: fadeIn 0.2s ease-out;
+}
+
+/* Recharts custom styles */
+.recharts-tooltip-wrapper .recharts-default-tooltip {
+  background-color: #111827 !important;
+  border: 1px solid #1f2937 !important;
+  border-radius: 8px !important;
+}

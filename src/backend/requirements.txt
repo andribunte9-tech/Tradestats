@@ -1,0 +1,6 @@
+MetaTrader5==5.0.45
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+
+# Nur für den Build-Prozess (nicht für den Enduser)
+# pip install pyinstaller

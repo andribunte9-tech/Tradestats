@@ -1,0 +1,42 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm create:*)",
+      "Read(//c/Program Files/**)",
+      "Read(//c/Program Files \\(x86\\)/**)",
+      "Read(//c/Users/andri/AppData/Roaming/**)",
+      "Read(//c/Users/andri/**)",
+      "Bash(cmd.exe /c \"where node 2>&1 && where npm 2>&1\")",
+      "Bash(cmd.exe /c \"node --version 2>&1 && npm --version 2>&1\")",
+      "Bash(cmd.exe /c \"C:\\\\\\\\Windows\\\\\\\\System32\\\\\\\\cmd.exe /c where node\")",
+      "Bash(cmd.exe /c \"mkdir C:\\\\Tradestats-app\\\\backend 2>&1\")",
+      "Bash(cmd.exe /c \"mkdir \\\\\"C:\\\\Tradestats-app\\\\backend\\\\\" && echo success\")",
+      "Bash(cmd.exe /c \"dir C:\\\\Tradestats-app\\\\\")",
+      "Bash(cmd.exe /c \"md C:\\\\Tradestats-app\\\\backend\")",
+      "Bash(cmd.exe /c \"dir C:\\\\Tradestats-app\")",
+      "Bash(cmd.exe /c \"dir /b C:\\\\Tradestats-app\")",
+      "Bash(install -d /c/Tradestats-app/backend)",
+      "Bash(chmod 777 /c/Tradestats-app)",
+      "Bash(powershell.exe -Command \"New-Item -ItemType Directory -Path 'C:\\\\Tradestats-app\\\\backend' -Force | Out-Null; Write-Host 'Done'\")",
+      "Bash(grep -n '`' /c/Tradestats-app/src/setup_autostart.ps1)",
+      "Bash(powershell.exe -Command 'Unregister-ScheduledTask -TaskName '\\\\''TradeStats Autostart'\\\\'' -Confirm:$false 2>&1')",
+      "Bash(powershell.exe -ExecutionPolicy Bypass -File \"C:\\\\Tradestats-app\\\\src\\\\create_start.ps1\")",
+      "Bash(powershell.exe -ExecutionPolicy Bypass -Command ':*)",
+      "Bash(cd /d C:\\\\Tradestats-app)",
+      "Bash(npm list:*)",
+      "Bash(ls C:/Tradestats-app/*.bat C:/Tradestats-app/*.iss C:/Tradestats-app/*.md)",
+      "Bash(\"C:\\\\Users\\\\andri\\\\AppData\\\\Local\\\\Python\\\\pythoncore-3.14-64\\\\Scripts\\\\pyinstaller.exe\" --clean --distpath \"..\\\\..\\\\release\\\\app\" tradestats.spec)",
+      "Bash(xcopy /e /i /q \"C:\\\\Tradestats-app\\\\dist\" \"C:\\\\Tradestats-app\\\\src\\\\backend\\\\dist\")",
+      "Bash(\"C:\\\\Users\\\\andri\\\\AppData\\\\Local\\\\Python\\\\pythoncore-3.14-64\\\\Scripts\\\\pyinstaller.exe\" --clean -y --distpath \"..\\\\..\\\\release\\\\app\" tradestats.spec)",
+      "Bash(taskkill /F /IM TradeStats.exe)",
+      "Bash(powershell -Command \"Stop-Process -Name TradeStats -Force -ErrorAction SilentlyContinue; Start-Sleep 2; Write-Host done\")",
+      "Bash(\"C:\\\\Users\\\\andri\\\\AppData\\\\Local\\\\Python\\\\pythoncore-3.14-64\\\\python.exe\" -c \"import ast, sys; ast.parse\\(open\\('sync.py'\\).read\\(\\)\\); print\\('Syntax OK'\\)\")",
+      "Bash(powershell -Command \"Stop-Process -Name TradeStats -Force -ErrorAction SilentlyContinue; Start-Sleep 1; Write-Host 'Prozesse gestoppt'\")",
+      "Bash(powershell -Command \"Stop-Process -Name TradeStats -Force -ErrorAction SilentlyContinue; Start-Sleep 1\")",
+      "Bash(cp -r \"C:/Tradestats-app/dist\" \"C:/Tradestats-app/src/backend/dist\")",
+      "Bash(powershell -Command \"Stop-Process -Name TradeStats -Force -ErrorAction SilentlyContinue; Start-Sleep 1\" cp -r \"C:/Tradestats-app/dist\" \"C:/Tradestats-app/src/backend/dist\")",
+      "Bash(npm run:*)",
+      "Bash(\"C:\\\\Users\\\\andri\\\\AppData\\\\Local\\\\Python\\\\pythoncore-3.14-64\\\\python.exe\" -c \"import ast; ast.parse\\(open\\('sync.py'\\).read\\(\\)\\); print\\('Syntax OK'\\)\")"
+    ]
+  }
+}

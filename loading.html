@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TradeStats wird gestartet…</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #0a0f1a;
+      color: #e2e8f0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+
+    .logo {
+      width: 64px;
+      height: 64px;
+      background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+      border-radius: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 24px;
+      animation: pulse-logo 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse-logo {
+      0%, 100% { box-shadow: 0 0 30px rgba(16,185,129,0.25); }
+      50%       { box-shadow: 0 0 55px rgba(16,185,129,0.50); }
+    }
+
+    .logo svg { width: 34px; height: 34px; }
+
+    .title {
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      color: #fff;
+      margin-bottom: 6px;
+    }
+
+    .subtitle {
+      font-size: 14px;
+      color: #64748b;
+      margin-bottom: 48px;
+    }
+
+    .progress-wrap {
+      width: 280px;
+      height: 4px;
+      background: #1e293b;
+      border-radius: 99px;
+      overflow: hidden;
+      margin-bottom: 20px;
+    }
+
+    .progress-bar {
+      height: 100%;
+      background: linear-gradient(90deg, #10b981, #34d399);
+      border-radius: 99px;
+      width: 0%;
+      transition: width 0.6s ease;
+    }
+
+    .status {
+      font-size: 13px;
+      color: #475569;
+      height: 20px;
+      text-align: center;
+    }
+
+    .dots {
+      display: inline-flex;
+      gap: 5px;
+      margin-top: 36px;
+    }
+
+    .dots span {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #334155;
+      animation: dot-bounce 1.4s ease-in-out infinite;
+    }
+
+    .dots span:nth-child(1) { animation-delay: 0.0s; }
+    .dots span:nth-child(2) { animation-delay: 0.2s; }
+    .dots span:nth-child(3) { animation-delay: 0.4s; }
+
+    @keyframes dot-bounce {
+      0%, 80%, 100% { background: #334155; transform: scale(1); }
+      40%           { background: #10b981; transform: scale(1.35); }
+    }
+
+    .check {
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      background: rgba(16,185,129,0.12);
+      border: 2px solid #10b981;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      margin-top: 32px;
+      animation: pop-in 0.4s cubic-bezier(0.34,1.56,0.64,1);
+    }
+
+    .check.visible { display: flex; }
+
+    @keyframes pop-in {
+      from { transform: scale(0); opacity: 0; }
+      to   { transform: scale(1); opacity: 1; }
+    }
+
+    .version {
+      position: fixed;
+      bottom: 20px;
+      font-size: 11px;
+      color: #1e293b;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="logo">
+    <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"
+         stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/>
+      <polyline points="16 7 22 7 22 13"/>
+    </svg>
+  </div>
+
+  <div class="title">TradeStats</div>
+  <div class="subtitle">Trading Journal</div>
+
+  <div class="progress-wrap">
+    <div class="progress-bar" id="bar"></div>
+  </div>
+
+  <div class="status" id="status">Server wird gestartet…</div>
+
+  <div class="dots" id="dots">
+    <span></span><span></span><span></span>
+  </div>
+
+  <div class="check" id="check">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
+         stroke="#10b981" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="20 6 9 17 4 12"/>
+    </svg>
+  </div>
+
+  <div class="version">TradeStats v1.0</div>
+
+  <script>
+    const TARGET = 'http://localhost:5173'
+    const bar    = document.getElementById('bar')
+    const status = document.getElementById('status')
+    const dots   = document.getElementById('dots')
+    const check  = document.getElementById('check')
+
+    // Fortschrittsbalken zeitgesteuert vorwärts schieben
+    const timeline = [
+      { ms:  1000, pct: 15, msg: 'npm install läuft…'        },
+      { ms:  6000, pct: 35, msg: 'Python Backend startet…'   },
+      { ms: 11000, pct: 55, msg: 'Vite Dev Server startet…'  },
+      { ms: 16000, pct: 72, msg: 'Warte auf Server…'         },
+      { ms: 22000, pct: 85, msg: 'Fast fertig…'              },
+    ]
+
+    timeline.forEach(({ ms, pct, msg }) => {
+      setTimeout(() => {
+        bar.style.width  = pct + '%'
+        status.textContent = msg
+      }, ms)
+    })
+
+    // Polling: jede Sekunde prüfen ob Vite antwortet
+    let attempts = 0
+
+    function poll() {
+      attempts++
+      if (attempts > 150) {           // nach 2.5 min aufgeben
+        status.textContent = 'Timeout — start.bat prüfen.'
+        bar.style.background = '#ef4444'
+        bar.style.width = '100%'
+        return
+      }
+
+      fetch(TARGET, { mode: 'no-cors', cache: 'no-store' })
+        .then(() => {
+          bar.style.width    = '100%'
+          status.textContent = 'Bereit! Weiterleitung…'
+          dots.style.display = 'none'
+          check.classList.add('visible')
+          setTimeout(() => { window.location.href = TARGET }, 700)
+        })
+        .catch(() => setTimeout(poll, 1000))
+    }
+
+    // Mit Polling nach 4s starten (npm install braucht Zeit)
+    setTimeout(poll, 4000)
+  </script>
+</body>
+</html>
