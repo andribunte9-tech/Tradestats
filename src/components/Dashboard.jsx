@@ -6,6 +6,7 @@ import {
 import { TrendingUp, TrendingDown, Activity, Target, Award, ChevronDown, X, Percent, BarChart2, CalendarDays } from 'lucide-react'
 import { useTrades } from '../hooks/useTrades'
 import { LiveSyncPanel } from './LiveSyncPanel'
+import { useLiveSync } from '../hooks/useLiveSync'
 import { usePrivacyMode, Pvt } from '../hooks/usePrivacyMode'
 import { useLanguage } from '../hooks/useLanguage'
 import {
@@ -379,6 +380,11 @@ function SectionHeader({ title, sub }) {
 export default function Dashboard() {
   const { trades, effectiveTrades, allTags } = useTrades()
   const { privacyMode, accountBalance } = usePrivacyMode()
+  const { status: liveStatus } = useLiveSync()
+  // Live Balance (geschlossene Equity, OHNE schwankende offene Positionen) —
+  // bevorzugt für die ROI-Basis, damit die Anzeige nicht bei jedem Tick wackelt.
+  // Fallback auf accountBalance (= Equity), falls Backend offline.
+  const referenceBalance = liveStatus?.account?.balance ?? accountBalance
   const { t } = useLanguage()
 
   // ── Filter State ──────────────────────────────────────────
@@ -437,8 +443,8 @@ export default function Dashboard() {
       if (periodCutoff && closeMs < periodCutoff) return s
       return s + (t.profit || 0) + (t.commission || 0) + (t.swap || 0)
     }, 0)
-    return accountBalance - sincePnl
-  }, [effectiveTrades, periodCutoff, accountBalance])
+    return referenceBalance - sincePnl
+  }, [effectiveTrades, periodCutoff, referenceBalance])
 
   // ROI % und Ø R:R — relativ zur Balance am Periodenanfang
   const roi    = balanceAtPeriodStart > 0 ? (stats.totalPnl / balanceAtPeriodStart) * 100 : 0
