@@ -486,10 +486,20 @@ export default function Dashboard() {
   const [activeCat,   setActiveCat]   = useState('alle')
   const [activeSym,   setActiveSym]   = useState(null)
   const [activeTag,   setActiveTag]   = useState('ALL')
-  const [timePeriod,  setTimePeriod]  = useState('all')
+  // Zeit-Filter über Reloads merken, damit ein HMR / Browser-Refresh nicht auf
+  // 'Alles' zurückspringt (dann wären die Navigations-Pfeile wieder weg).
+  const [timePeriod,  setTimePeriod]  = useState(() => {
+    try { return localStorage.getItem('tradestats_dash_period') || 'all' } catch { return 'all' }
+  })
   const [periodOffset, setPeriodOffset] = useState(0)   // 0 = aktuelle Periode, -1 = vorherige
   const [customRange, setCustomRange] = useState(null)   // { from, to } | null
   const [showPicker,  setShowPicker]  = useState(false)
+
+  // Persistiere die Periode bei jeder Änderung (Offset wird bewusst NICHT
+  // gespeichert — beim Neuladen startet man immer in der aktuellen Periode).
+  useEffect(() => {
+    try { localStorage.setItem('tradestats_dash_period', timePeriod) } catch {}
+  }, [timePeriod])
 
   // Gefilterte effektive Trades → Kategorie → Tag → Zeit
   const filteredTrades = useMemo(() => {
