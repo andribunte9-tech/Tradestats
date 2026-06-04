@@ -418,13 +418,26 @@ export default function Dashboard() {
   const pnlColor  = stats.totalPnl >= 0 ? '#10b981' : '#ef4444'
   const pfDisplay = stats.profitFactor === Infinity ? '∞' : stats.profitFactor.toFixed(2)
 
-  // Balance am Anfang der gewählten Periode (automatisch berechnet)
+  // Balance am Anfang der gewählten Periode (= Equity zu dem Zeitpunkt)
+  // Logik: aktuelle Equity minus alle Trade-P&Ls, die seit dem Period-Cutoff
+  // angefallen sind. Für "Alles" ist der Cutoff effektiv vor dem ersten Trade,
+  // somit base = aktuelle Equity minus Summe aller je gemachten P&Ls = Startkapital.
+  //
+  // Hinweis: Wir nutzen ALLE effektiven Trades (nicht die filtered), damit die
+  // Basis stabil bleibt egal welcher Kategorie/Tag-Filter aktiv ist. Sonst
+  // würde z.B. ein "nur Forex"-Filter die Basis verschieben, was die Inter-
+  // pretation des ROI verzerren würde.
   const periodCutoff = timePeriod === 'custom' && customRange?.from
     ? new Date(customRange.from + 'T00:00:00').getTime()
     : getPeriodCutoff(timePeriod)
   const balanceAtPeriodStart = useMemo(() => {
-    if (!periodCutoff) return accountBalance
-    return calcBalanceAt(effectiveTrades, periodCutoff, accountBalance)
+    const sincePnl = effectiveTrades.reduce((s, t) => {
+      if (!t.closeTime) return s
+      const closeMs = new Date(t.closeTime).getTime()
+      if (periodCutoff && closeMs < periodCutoff) return s
+      return s + (t.profit || 0) + (t.commission || 0) + (t.swap || 0)
+    }, 0)
+    return accountBalance - sincePnl
   }, [effectiveTrades, periodCutoff, accountBalance])
 
   // ROI % und Ø R:R — relativ zur Balance am Periodenanfang
