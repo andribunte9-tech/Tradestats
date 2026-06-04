@@ -20,10 +20,10 @@ const API =
   import.meta.env.VITE_API_URL ||
   'http://127.0.0.1:8000'
 const TIMEOUT_MS        = 3500
-const STATUS_INTERVAL   = 5_000   // ms
-const POSITION_INTERVAL = 5_000
-const HISTORY_INTERVAL  = 15_000
-const MFE_INTERVAL      = 5_000
+const STATUS_INTERVAL   = 1_000   // ms — Account-Info (Balance/Equity/Margin)
+const POSITION_INTERVAL = 1_000   // ms — offene Positionen + Live-P&L
+const HISTORY_INTERVAL  = 15_000  // ms — geschlossene Trades (selten)
+const MFE_INTERVAL      = 1_000   // ms — MFE/MAE-Watermarks (live tracking)
 const POST_CLOSE_DELAY  = 800     // ms — MT5 needs a beat to finalize the deal
 const MFE_STORAGE_KEY   = 'tradestats_mfe_mae'
 

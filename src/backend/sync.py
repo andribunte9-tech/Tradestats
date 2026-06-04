@@ -107,7 +107,9 @@ state = {
     "error":       None,
 }
 
-POLL_INTERVAL = 10   # seconds
+POLL_INTERVAL    = 1    # seconds — wie schnell MT5 abgefragt wird
+MFE_SAVE_INTERVAL = 5   # seconds — wie oft mfe_mae_live.json auf Disk geht
+                         # (gedrosselt, sonst 60 Writes/Min — Disk-Schonung)
 HISTORY_DAYS  = 180  # days of history to load
 
 # ── MFE/MAE Tracking ──────────────────────────────────────────────────────
@@ -183,6 +185,8 @@ def _save_mfe_archive(archive):
 mfe_mae_archive = _load_mfe_archive()
 # Live-Watermarks aus dem letzten Lauf wiederherstellen (überlebt Backend-Restart).
 mfe_mae_live = _load_mfe_live()
+# Throttling-Timestamp für den Disk-Save (siehe MFE_SAVE_INTERVAL)
+_last_mfe_save_ts = 0.0
 
 # ── Broker Timezone ───────────────────────────────────────────────────────
 # TMGM/MT5 Broker verwendet UTC+3 (EET - Eastern European Time).
@@ -360,6 +364,11 @@ def connect_mt5():
 # ─────────────────────────────────────────────────────────────────────────
 def polling_loop():
     log.info(f"Polling-Thread gestartet (alle {POLL_INTERVAL}s | {HISTORY_DAYS} Tage History)")
+    # History wird NICHT bei jedem 1s-Poll geladen (180-Tage-Query ist teuer und
+    # ändert sich selten). Stattdessen alle HISTORY_EVERY_N Polls + bei Erststart
+    # + sofort wenn eine Position schließt.
+    HISTORY_EVERY_N = 15
+    poll_count = 0
     while True:
         try:
             if not state["connected"]:
@@ -422,10 +431,16 @@ def polling_loop():
                         rec["maePrice"] = price
                     rec["lastUpdate"] = now_iso
 
-            # Persist live watermarks (so a Backend-Restart doesn't wipe history)
-            _save_mfe_live(mfe_mae_live)
+            # Persist live watermarks — gedrosselt auf MFE_SAVE_INTERVAL,
+            # damit bei 1s-Polling nicht jede Sekunde Disk-IO entsteht.
+            global _last_mfe_save_ts
+            now_ts = time_module.time()
+            if (now_ts - _last_mfe_save_ts) >= MFE_SAVE_INTERVAL:
+                _save_mfe_live(mfe_mae_live)
+                _last_mfe_save_ts = now_ts
 
             # Detect closed positions → move watermarks to persistent archive
+            position_closed = False
             for pid in list(mfe_mae_live.keys()):
                 if pid not in live_ids:
                     # MT5 position id (e.g. "pos-44892961") maps to history id "mt5-44892961"
@@ -441,26 +456,33 @@ def polling_loop():
                     }
                     del mfe_mae_live[pid]
                     _save_mfe_archive(mfe_mae_archive)
+                    position_closed = True
                     log.info(f"MFE/MAE archived for {archive_key}: MFE={mfe_mae_archive[archive_key]['mfe']}, MAE={mfe_mae_archive[archive_key]['mae']}")
 
-            # Closed history
-            # IMPORTANT: MT5 reports deal.time as broker server time stored as
-            # Unix-UTC label (not real UTC). For PUPrime in EEST that's +3h ahead.
-            # To capture today's deals we MUST extend dt_to by the broker offset,
-            # otherwise deals closed today get filtered out (their d.time looks
-            # like the future from our perspective).
-            dt_to   = datetime.now(timezone.utc) + timedelta(hours=BROKER_UTC_OFFSET, seconds=30)
-            dt_from = dt_to - timedelta(days=HISTORY_DAYS)
-            state["history"] = map_history_deals(mt5.history_deals_get(dt_from, dt_to))
+            # Closed history — NICHT bei jedem 1s-Poll (180-Tage-Query ist teuer).
+            # Wir laden sie nur: beim ersten Poll, alle HISTORY_EVERY_N Polls,
+            # oder sofort wenn eine Position gerade geschlossen wurde.
+            if poll_count == 0 or (poll_count % HISTORY_EVERY_N == 0) or position_closed:
+                # IMPORTANT: MT5 reports deal.time as broker server time stored as
+                # Unix-UTC label (not real UTC). For PUPrime in EEST that's +3h ahead.
+                # To capture today's deals we MUST extend dt_to by the broker offset,
+                # otherwise deals closed today get filtered out (their d.time looks
+                # like the future from our perspective).
+                dt_to   = datetime.now(timezone.utc) + timedelta(hours=BROKER_UTC_OFFSET, seconds=30)
+                dt_from = dt_to - timedelta(days=HISTORY_DAYS)
+                state["history"] = map_history_deals(mt5.history_deals_get(dt_from, dt_to))
 
             state["last_update"] = datetime.now(timezone.utc).isoformat()
             state["error"]       = None
+            poll_count += 1
 
-            log.info(
-                f"Poll OK | Pos: {len(state['positions'])} | "
-                f"History: {len(state['history'])} | "
-                f"Equity: {a.equity if a else '?'} {a.currency if a else ''}"
-            )
+            # Poll-Log gedrosselt (nicht jede Sekunde spammen) — nur alle 15 Polls.
+            if poll_count % HISTORY_EVERY_N == 1:
+                log.info(
+                    f"Poll OK | Pos: {len(state['positions'])} | "
+                    f"History: {len(state['history'])} | "
+                    f"Equity: {a.equity if a else '?'} {a.currency if a else ''}"
+                )
 
         except Exception as exc:
             log.error(f"Polling-Fehler: {exc}", exc_info=True)
