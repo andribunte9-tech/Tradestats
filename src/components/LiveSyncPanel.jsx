@@ -225,36 +225,111 @@ function priceDistancePct(from, to) {
   return ((to - from) / from) * 100
 }
 
-function RiskBar({ pos }) {
-  const { sl, tp, openPrice, currentPrice, type } = pos
-  if (!sl && !tp) return <span className="text-[10px] text-slate-700">—</span>
+/**
+ * Backend transformiert die Live-MFE/MAE-Keys von "pos-{ticket}" zu
+ * "mt5-{ticket}" (siehe sync.py /mfe-mae endpoint). Hier mappen wir das
+ * zurück: position.id ist "pos-...", live-map-key ist "mt5-...".
+ */
+function lookupMfeLive(mfeLiveMap, pos) {
+  if (!mfeLiveMap || !pos) return null
+  const archiveKey = pos.id ? pos.id.replace(/^pos-/, 'mt5-') : null
+  return mfeLiveMap[archiveKey] || mfeLiveMap[pos.id] || null
+}
 
-  // Direction-aware progress: how far are we from entry toward SL (loss) or TP (win)?
-  const slDist = sl ? Math.abs(priceDistancePct(openPrice, sl)) : null
-  const tpDist = tp ? Math.abs(priceDistancePct(openPrice, tp)) : null
-  const curDist = priceDistancePct(openPrice, currentPrice)
+/**
+ * Berechnet die "signierte Prozentzahl in Richtung TP" und konvertiert die
+ * MFE/MAE-Dollar-Werte in dieselbe Einheit. Positiv = Richtung TP,
+ * Negativ = Richtung Verlust. Werte sind bereits auf ±100 geklammert.
+ *
+ * Gibt null zurück, wenn keine sinnvolle Skala ableitbar ist (kein TP,
+ * gerade exakt break-even ohne Daten zum Umrechnen, etc.).
+ */
+function computeTpProgress({ openPrice, currentPrice, tp, type, netPnl }, mfeMaeLive) {
+  if (!tp || tp <= 0 || !openPrice) return null
+  const dirSign = type === 'BUY' ? 1 : -1
+  const signedCurrDist = (currentPrice - openPrice) * dirSign
+  const tpDist = Math.abs(tp - openPrice)
+  if (tpDist <= 0) return null
 
-  const movingTowardWin = type === 'BUY' ? curDist > 0 : curDist < 0
-  const absCur = Math.abs(curDist)
-  const target = movingTowardWin ? tpDist : slDist
+  const signedPct = (signedCurrDist / tpDist) * 100   // kann negativ sein
 
-  let pctToTarget = 0
-  if (target && target > 0) pctToTarget = Math.min(100, (absCur / target) * 100)
+  let mfePct = null
+  let maePct = null
+  // Konversion $ → % via netPnl-Skala (nur möglich wenn beide nicht 0 sind).
+  if (mfeMaeLive && netPnl && Math.abs(signedCurrDist) > 1e-12) {
+    const factor = signedPct / netPnl   // % pro $
+    if (mfeMaeLive.mfe != null) mfePct = Math.max(0, Math.min(100, mfeMaeLive.mfe * factor))
+    if (mfeMaeLive.mae != null) maePct = Math.max(-100, Math.min(0, mfeMaeLive.mae * factor))
+  }
 
-  const color = movingTowardWin ? '#10b981' : '#ef4444'
+  return {
+    signedPct: Math.max(-100, Math.min(100, signedPct)),
+    mfePct,   // positiv (oder null)
+    maePct,   // negativ (oder null)
+  }
+}
+
+/**
+ * Zwei-seitige TP-Progress-Bar mit Ghost-Trail für MFE (max Gewinn-Ausschlag)
+ * und MAE (max Verlust-Ausschlag). Aufbau:
+ *
+ *   [---ghost-rot MAE---|--solid-rot current---] mitte [--solid-grün current---|---ghost-grün MFE---]
+ *
+ * Jede Hälfte deckt maximal 50% der Bar-Breite ab — 100% Richtung TP = volle Hälfte.
+ * Kein Prozent-Label; Hover-Tooltip zeigt die Zahlen.
+ */
+function TpProgressBar({ progress }) {
+  if (!progress) return <span className="text-[10px] text-slate-700">—</span>
+  const { signedPct, mfePct, maePct } = progress
+  const half = (n) => Math.max(0, Math.min(50, Math.abs(n) / 2))   // jede Seite max 50% der Bar
+
+  const tipParts = []
+  tipParts.push(`${signedPct >= 0 ? '+' : ''}${signedPct.toFixed(0)}% → TP`)
+  if (mfePct != null && mfePct > 0) tipParts.push(`MFE: +${mfePct.toFixed(0)}%`)
+  if (maePct != null && maePct < 0) tipParts.push(`MAE: ${maePct.toFixed(0)}%`)
+
   return (
-    <div className="flex items-center gap-1.5">
-      <div className="flex-1 h-1.5 bg-[#1f2937] rounded-full overflow-hidden min-w-[40px] max-w-[80px]">
+    <div
+      className="relative h-1.5 bg-[#1f2937] rounded-full overflow-hidden min-w-[60px] max-w-[100px]"
+      title={tipParts.join('  ·  ')}
+    >
+      {/* Center-Divider */}
+      <div className="absolute top-0 bottom-0 w-px bg-slate-600" style={{ left: '50%' }} />
+
+      {/* Ghost-MFE — heller grüner Schweif, zeigt wie weit der Trade mal vorn war */}
+      {mfePct != null && mfePct > 0 && (
         <div
-          className="h-full rounded-full transition-all"
-          style={{ width: `${pctToTarget}%`, backgroundColor: color }}
+          className="absolute top-0 bottom-0 bg-[#10b981]"
+          style={{ left: '50%', width: `${half(mfePct)}%`, opacity: 0.25 }}
         />
-      </div>
-      <span className="text-[10px] font-mono" style={{ color }}>
-        {pctToTarget.toFixed(0)}%
-      </span>
+      )}
+      {/* Ghost-MAE — heller roter Schweif, zeigt wie tief im Minus es mal war */}
+      {maePct != null && maePct < 0 && (
+        <div
+          className="absolute top-0 bottom-0 bg-[#ef4444]"
+          style={{ right: '50%', width: `${half(maePct)}%`, opacity: 0.25 }}
+        />
+      )}
+      {/* Solid: aktueller Stand (überlagert die Ghosts) */}
+      {signedPct > 0 && (
+        <div
+          className="absolute top-0 bottom-0 bg-[#10b981] transition-all"
+          style={{ left: '50%', width: `${half(signedPct)}%` }}
+        />
+      )}
+      {signedPct < 0 && (
+        <div
+          className="absolute top-0 bottom-0 bg-[#ef4444] transition-all"
+          style={{ right: '50%', width: `${half(signedPct)}%` }}
+        />
+      )}
     </div>
   )
+}
+
+function RiskBar({ pos, mfeLive }) {
+  const progress = computeTpProgress(pos, mfeLive)
+  return <TpProgressBar progress={progress} />
 }
 
 function SlTpCell({ pos, kind }) {
@@ -273,7 +348,7 @@ function SlTpCell({ pos, kind }) {
 }
 
 /* ─── Open Positions Table ───────────────────────────────── */
-function PositionRow({ pos, indent = false, onOpenNotes }) {
+function PositionRow({ pos, indent = false, onOpenNotes, mfeLive }) {
   const { get } = usePositionNotes()
   const note = get(pos.id)
   const hasNote = !!(note.notes || note.tags?.length)
@@ -311,7 +386,7 @@ function PositionRow({ pos, indent = false, onOpenNotes }) {
       </td>
       <td className="px-4 py-2.5"><SlTpCell pos={pos} kind="sl" /></td>
       <td className="px-4 py-2.5"><SlTpCell pos={pos} kind="tp" /></td>
-      <td className="px-4 py-2.5 min-w-[100px]"><RiskBar pos={pos} /></td>
+      <td className="px-4 py-2.5 min-w-[100px]"><RiskBar pos={pos} mfeLive={mfeLive} /></td>
       <td className="px-4 py-2.5 text-slate-500 text-xs whitespace-nowrap">
         {duration != null ? formatDuration(duration) : '—'}
       </td>
@@ -320,42 +395,32 @@ function PositionRow({ pos, indent = false, onOpenNotes }) {
   )
 }
 
-function GroupRiskBar({ group }) {
-  // Use volume-weighted avg entry + TP/SL as if the group were one virtual position.
-  const { avgEntry, avgTp, avgSl, currentPrice, type } = group
-  const hasTp = avgTp > 0
-  const hasSl = avgSl > 0
-  if (!hasTp && !hasSl) return <span className="text-[10px] text-slate-700">—</span>
-  if (type === 'MIXED') return <span className="text-[10px] text-slate-700">—</span>
+function GroupRiskBar({ group, mfeLiveMap }) {
+  // Behandle den Group wie eine virtuelle Position mit Volumen-gewichtetem Mittel.
+  const { avgEntry, avgTp, currentPrice, type, members, totalPnl } = group
+  if (avgTp <= 0 || type === 'MIXED') return <span className="text-[10px] text-slate-700">—</span>
 
-  // Direction: BUY = up moves towards TP, SELL = down moves towards TP
-  const curMove = type === 'BUY' ? currentPrice - avgEntry : avgEntry - currentPrice
-  const tpDist  = hasTp ? (type === 'BUY' ? avgTp - avgEntry : avgEntry - avgTp) : 0
-  const slDist  = hasSl ? (type === 'BUY' ? avgEntry - avgSl : avgSl - avgEntry) : 0
+  // MFE/MAE des Groups = Summe der Live-Werte aller Mitglieder (in $)
+  let mfeSum = 0
+  let maeSum = 0
+  let hasMfe = false
+  let hasMae = false
+  for (const m of members) {
+    const live = lookupMfeLive(mfeLiveMap, m)
+    if (!live) continue
+    if (live.mfe != null) { mfeSum += live.mfe; hasMfe = true }
+    if (live.mae != null) { maeSum += live.mae; hasMae = true }
+  }
+  const aggregated = (hasMfe || hasMae) ? { mfe: hasMfe ? mfeSum : null, mae: hasMae ? maeSum : null } : null
 
-  const towardsWin = curMove > 0
-  const targetDist = towardsWin ? tpDist : slDist
-  const absCur = Math.abs(curMove)
-  let pctToTarget = 0
-  if (targetDist > 0) pctToTarget = Math.min(100, (absCur / targetDist) * 100)
-
-  const color = towardsWin ? '#10b981' : '#ef4444'
-  return (
-    <div className="flex items-center gap-1.5">
-      <div className="flex-1 h-1.5 bg-[#1f2937] rounded-full overflow-hidden min-w-[40px] max-w-[80px]">
-        <div
-          className="h-full rounded-full transition-all"
-          style={{ width: `${pctToTarget}%`, backgroundColor: color }}
-        />
-      </div>
-      <span className="text-[10px] font-mono" style={{ color }}>
-        {pctToTarget.toFixed(0)}%
-      </span>
-    </div>
+  const progress = computeTpProgress(
+    { openPrice: avgEntry, currentPrice, tp: avgTp, type, netPnl: totalPnl },
+    aggregated
   )
+  return <TpProgressBar progress={progress} />
 }
 
-function PositionGroupRow({ group, isExpanded, onToggle }) {
+function PositionGroupRow({ group, isExpanded, onToggle, mfeLiveMap }) {
   const duration = group.openTime
     ? differenceInMinutes(new Date(), new Date(group.openTime))
     : null
@@ -422,7 +487,7 @@ function PositionGroupRow({ group, isExpanded, onToggle }) {
         )}
       </td>
       {/* Risk/Reward Progress */}
-      <td className="px-4 py-3 min-w-[100px]"><GroupRiskBar group={group} /></td>
+      <td className="px-4 py-3 min-w-[100px]"><GroupRiskBar group={group} mfeLiveMap={mfeLiveMap} /></td>
       <td className="px-4 py-3 text-slate-500 text-xs whitespace-nowrap">
         {duration != null ? formatDuration(duration) : '—'}
       </td>
@@ -431,7 +496,7 @@ function PositionGroupRow({ group, isExpanded, onToggle }) {
   )
 }
 
-function PositionsTable({ positions }) {
+function PositionsTable({ positions, mfeLiveMap }) {
   const totalPnl = positions.reduce((s, p) => s + p.netPnl, 0)
   const groups = useMemo(() => buildPositionGroups(positions), [positions])
   const groupCount = groups.filter(g => !g.isSingle).length
@@ -485,16 +550,28 @@ function PositionsTable({ positions }) {
             <tbody>
               {groups.map(group => (
                 group.isSingle ? (
-                  <PositionRow key={group.key} pos={group.members[0]} onOpenNotes={setNotesPos} />
+                  <PositionRow
+                    key={group.key}
+                    pos={group.members[0]}
+                    onOpenNotes={setNotesPos}
+                    mfeLive={lookupMfeLive(mfeLiveMap, group.members[0])}
+                  />
                 ) : (
                   <Fragment key={group.key}>
                     <PositionGroupRow
                       group={group}
                       isExpanded={expanded.has(group.key)}
                       onToggle={() => toggleGroup(group.key)}
+                      mfeLiveMap={mfeLiveMap}
                     />
                     {expanded.has(group.key) && group.members.map(pos => (
-                      <PositionRow key={pos.id} pos={pos} indent onOpenNotes={setNotesPos} />
+                      <PositionRow
+                        key={pos.id}
+                        pos={pos}
+                        indent
+                        onOpenNotes={setNotesPos}
+                        mfeLive={lookupMfeLive(mfeLiveMap, pos)}
+                      />
                     ))}
                   </Fragment>
                 )
@@ -510,9 +587,10 @@ function PositionsTable({ positions }) {
 
 /* ─── Main LiveSyncPanel (used in Dashboard) ─────────────── */
 export function LiveSyncPanel() {
-  const { status, positions } = useLiveSync()
+  const { status, positions, mfeMae } = useLiveSync()
   const { t } = useLanguage()
   const [collapsed, setCollapsed] = useState(false)
+  const mfeLiveMap = mfeMae?.live || {}
 
   // Don't render if backend is not reachable
   if (!status.apiReachable) return null
@@ -551,7 +629,7 @@ export function LiveSyncPanel() {
       {!collapsed && status.connected && (
         <>
           <AccountBar account={status.account} />
-          <PositionsTable positions={positions} />
+          <PositionsTable positions={positions} mfeLiveMap={mfeLiveMap} />
         </>
       )}
     </div>
