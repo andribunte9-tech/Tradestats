@@ -266,13 +266,17 @@ function computeTpProgress({ openPrice, currentPrice, tp, type, netPnl }, mfeMae
   // Bevorzugte Quelle: gespeicherte Peak/Trough-Preise (vom Backend getrackt).
   // Diese sind stabil über die Position-Lebensdauer — sie ändern sich nur wenn
   // wirklich ein neuer Peak/Tiefpunkt erreicht wird.
+  // Wir speichern auch dann, wenn das Vorzeichen nicht zur "klassischen" Seite
+  // passt (z.B. Trade war nie im Minus → maePct ist trotzdem informativ als
+  // "niedrigster Gewinn-Punkt"). Die TpProgressBar entscheidet später, was
+  // visuell vs. textuell angezeigt wird.
   if (mfeMaeLive?.mfePrice != null) {
     const p = priceToPct(mfeMaeLive.mfePrice)
-    if (p != null && p > 0) mfePct = Math.min(100, p)
+    if (p != null) mfePct = Math.max(-100, Math.min(100, p))
   }
   if (mfeMaeLive?.maePrice != null) {
     const p = priceToPct(mfeMaeLive.maePrice)
-    if (p != null && p < 0) maePct = Math.max(-100, p)
+    if (p != null) maePct = Math.max(-100, Math.min(100, p))
   }
 
   // Fallback (alte Daten ohne Preis): $ → % via netPnl-Skala. Drift möglich
@@ -309,17 +313,19 @@ function TpProgressBar({ progress }) {
   const { signedPct, mfePct, maePct } = progress
   const half = (n) => Math.max(0, Math.min(50, Math.abs(n) / 2))   // jede Seite max 50% der Bar
 
-  // Sekundär-Werte nur zeigen, wenn sie sich nennenswert vom Current unterscheiden
-  // (sonst wäre die Anzeige redundant: "+18% · +18%")
-  const showMfe = mfePct != null && mfePct > Math.max(signedPct, 0) + 3
-  const showMae = maePct != null && maePct < Math.min(signedPct, 0) - 3
+  // Sekundär-Werte zeigen, wenn sie sich >3 Pkt vom aktuellen Stand unterscheiden.
+  // mfePct ist der höchste je erreichte Punkt (kann auch im Plus liegen).
+  // maePct ist der tiefste je erreichte Punkt (kann auch im Plus liegen,
+  // wenn der Trade nie ins Minus ging — dann ist es der "niedrigste Gewinn").
+  const showMfe = mfePct != null && mfePct > signedPct + 3
+  const showMae = maePct != null && maePct < signedPct - 3
 
   const fmt = (n) => `${n >= 0 ? '+' : ''}${n.toFixed(0)}%`
   const currentColor = signedPct >= 0 ? '#10b981' : '#ef4444'
 
   const tipParts = [`${fmt(signedPct)} → TP`]
-  if (mfePct != null && mfePct > 0) tipParts.push(`MFE: ${fmt(mfePct)}`)
-  if (maePct != null && maePct < 0) tipParts.push(`MAE: ${fmt(maePct)}`)
+  if (mfePct != null) tipParts.push(`MFE: ${fmt(mfePct)}`)
+  if (maePct != null) tipParts.push(`MAE: ${fmt(maePct)}`)
 
   return (
     <div className="flex items-center gap-1.5" title={tipParts.join('  ·  ')}>
@@ -328,14 +334,14 @@ function TpProgressBar({ progress }) {
         {/* Center-Divider */}
         <div className="absolute top-0 bottom-0 w-px bg-slate-600" style={{ left: '50%' }} />
 
-        {/* Ghost-MFE */}
+        {/* Ghost-MFE: zeigt den positiven Ausschlag (nur wenn auch positiv) */}
         {mfePct != null && mfePct > 0 && (
           <div
             className="absolute top-0 bottom-0 bg-[#10b981]"
             style={{ left: '50%', width: `${half(mfePct)}%`, opacity: 0.25 }}
           />
         )}
-        {/* Ghost-MAE */}
+        {/* Ghost-MAE: zeigt den negativen Ausschlag (nur wenn auch negativ) */}
         {maePct != null && maePct < 0 && (
           <div
             className="absolute top-0 bottom-0 bg-[#ef4444]"
@@ -450,18 +456,37 @@ function GroupRiskBar({ group, mfeLiveMap }) {
   const { avgEntry, avgTp, currentPrice, type, members, totalPnl } = group
   if (avgTp <= 0 || type === 'MIXED') return <span className="text-[10px] text-slate-700">—</span>
 
-  // MFE/MAE des Groups = Summe der Live-Werte aller Mitglieder (in $)
-  let mfeSum = 0
-  let maeSum = 0
-  let hasMfe = false
-  let hasMae = false
+  // MFE/MAE-Preis aggregieren: nicht Volumen-gewichtetes Mittel, sondern den
+  // EXTREMSTEN Preis aller Member nehmen (jenseits-am-meisten-favorabel /
+  // -adversiv). Das entspricht der Logik "wann war die Gruppe am weitesten
+  // vorne / hinten?" — wir nehmen die Out-of-Sample-Extreme.
+  let mfeSum = 0, maeSum = 0
+  let mfePrice = null, maePrice = null
+  let hasMfe = false, hasMae = false
+  const isBuy = type === 'BUY'
   for (const m of members) {
     const live = lookupMfeLive(mfeLiveMap, m)
     if (!live) continue
     if (live.mfe != null) { mfeSum += live.mfe; hasMfe = true }
     if (live.mae != null) { maeSum += live.mae; hasMae = true }
+    // Favorable price: BUY = höher, SELL = niedriger. Wir behalten das extreme.
+    if (live.mfePrice != null) {
+      if (mfePrice == null) mfePrice = live.mfePrice
+      else mfePrice = isBuy ? Math.max(mfePrice, live.mfePrice) : Math.min(mfePrice, live.mfePrice)
+    }
+    if (live.maePrice != null) {
+      if (maePrice == null) maePrice = live.maePrice
+      else maePrice = isBuy ? Math.min(maePrice, live.maePrice) : Math.max(maePrice, live.maePrice)
+    }
   }
-  const aggregated = (hasMfe || hasMae) ? { mfe: hasMfe ? mfeSum : null, mae: hasMae ? maeSum : null } : null
+  const aggregated = (hasMfe || hasMae || mfePrice != null || maePrice != null)
+    ? {
+        mfe: hasMfe ? mfeSum : null,
+        mae: hasMae ? maeSum : null,
+        mfePrice,
+        maePrice,
+      }
+    : null
 
   const progress = computeTpProgress(
     { openPrice: avgEntry, currentPrice, tp: avgTp, type, netPnl: totalPnl },

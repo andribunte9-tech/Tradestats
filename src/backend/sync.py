@@ -150,6 +150,28 @@ def _load_mfe_archive():
         log.warning(f"MFE/MAE archive load failed: {e}")
     return {}
 
+_MFE_LIVE_FILE = os.path.join(_LOG_DIR, 'mfe_mae_live.json')
+
+def _load_mfe_live():
+    """Lädt die Live-Watermarks vom letzten Backend-Lauf, damit ein Restart
+    nicht die laufende MFE/MAE-Historie der offenen Positionen wegwirft."""
+    try:
+        if os.path.isfile(_MFE_LIVE_FILE):
+            with open(_MFE_LIVE_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except Exception as e:
+        log = logging.getLogger(__name__)
+        log.warning(f"MFE/MAE live load failed: {e}")
+    return {}
+
+def _save_mfe_live(live):
+    try:
+        with open(_MFE_LIVE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(live, f, indent=2)
+    except Exception as e:
+        log = logging.getLogger(__name__)
+        log.warning(f"MFE/MAE live save failed: {e}")
+
 def _save_mfe_archive(archive):
     try:
         with open(_MFE_FILE, 'w', encoding='utf-8') as f:
@@ -159,6 +181,8 @@ def _save_mfe_archive(archive):
         log.warning(f"MFE/MAE archive save failed: {e}")
 
 mfe_mae_archive = _load_mfe_archive()
+# Live-Watermarks aus dem letzten Lauf wiederherstellen (überlebt Backend-Restart).
+mfe_mae_live = _load_mfe_live()
 
 # ── Broker Timezone ───────────────────────────────────────────────────────
 # TMGM/MT5 Broker verwendet UTC+3 (EET - Eastern European Time).
@@ -397,6 +421,9 @@ def polling_loop():
                     if adverse_price or rec.get("maePrice") is None:
                         rec["maePrice"] = price
                     rec["lastUpdate"] = now_iso
+
+            # Persist live watermarks (so a Backend-Restart doesn't wipe history)
+            _save_mfe_live(mfe_mae_live)
 
             # Detect closed positions → move watermarks to persistent archive
             for pid in list(mfe_mae_live.keys()):
