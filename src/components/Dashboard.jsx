@@ -3,7 +3,7 @@ import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, ReferenceLine,
 } from 'recharts'
-import { TrendingUp, TrendingDown, Activity, Target, Award, ChevronDown, X, Percent, BarChart2, CalendarDays } from 'lucide-react'
+import { TrendingUp, TrendingDown, Activity, Target, Award, ChevronDown, ChevronLeft, ChevronRight, X, Percent, BarChart2, CalendarDays } from 'lucide-react'
 import { useTrades } from '../hooks/useTrades'
 import { LiveSyncPanel } from './LiveSyncPanel'
 import { useLiveSync } from '../hooks/useLiveSync'
@@ -270,20 +270,70 @@ const TIME_FILTERS = [
   { id: 'custom', labelKey: null,          days: null },   // Datum-Bereich
 ]
 
-function getPeriodCutoff(period) {
+// Welche Periode-Typen sind navigierbar (mit ◀/▶-Pfeilen zu vorherigen Perioden)?
+// Rolling-Windows wie "letzte 3 Monate" sind nicht navigierbar — sie haben kein
+// natürliches "Vorher". Kalender-Ebenen (Tag/Woche/Monat/Jahr) sehr wohl.
+const NAVIGABLE_PERIODS = { '1D': 'day', '1W': 'week', '1M': 'month', '1Y': 'year' }
+
+function isNavigable(period) {
+  return Object.prototype.hasOwnProperty.call(NAVIGABLE_PERIODS, period)
+}
+
+/**
+ * Kalender-Range für navigierbare Perioden inkl. Offset (0 = aktuell, -1 = vorherige).
+ * Liefert {from, to} in ms. Rollende Perioden (3M/6M/Alles) gehen NICHT durch
+ * diese Funktion — die nutzen weiter den Rolling-Cutoff.
+ */
+function getNavigableRange(period, offset = 0, now = new Date()) {
+  const kind = NAVIGABLE_PERIODS[period]
+  if (!kind) return null
+  const shifted = new Date(now)
+  if (kind === 'day')   shifted.setDate(shifted.getDate() + offset)
+  if (kind === 'week')  shifted.setDate(shifted.getDate() + offset * 7)
+  if (kind === 'month') shifted.setMonth(shifted.getMonth() + offset)
+  if (kind === 'year')  shifted.setFullYear(shifted.getFullYear() + offset)
+  const d = new Date(shifted)
+  d.setHours(0, 0, 0, 0)
+
+  if (kind === 'day') {
+    const from = new Date(d).getTime()
+    const to   = from + 86_400_000 - 1
+    return { from, to }
+  }
+  if (kind === 'week') {
+    // ISO-Wochen-Logik: Montag = Start.
+    const dow = d.getDay()
+    const offsetToMonday = (dow + 6) % 7
+    const fromDate = new Date(d); fromDate.setDate(d.getDate() - offsetToMonday)
+    const from = fromDate.getTime()
+    const to   = from + 7 * 86_400_000 - 1
+    return { from, to }
+  }
+  if (kind === 'month') {
+    const from = new Date(d.getFullYear(), d.getMonth(),     1, 0, 0, 0, 0).getTime()
+    const to   = new Date(d.getFullYear(), d.getMonth() + 1, 1, 0, 0, 0, 0).getTime() - 1
+    return { from, to }
+  }
+  if (kind === 'year') {
+    const from = new Date(d.getFullYear(),     0, 1).getTime()
+    const to   = new Date(d.getFullYear() + 1, 0, 1).getTime() - 1
+    return { from, to }
+  }
+  return null
+}
+
+function getPeriodCutoff(period, offset = 0) {
+  if (isNavigable(period)) {
+    const r = getNavigableRange(period, offset)
+    return r ? r.from : null
+  }
   const tf = TIME_FILTERS.find(f => f.id === period)
   if (!tf?.days) return null
-  // '1D' = ab Beginn des heutigen Tages (00:00), nicht "letzte 24 Stunden"
-  if (period === '1D') {
-    const d = new Date()
-    d.setHours(0, 0, 0, 0)
-    return d.getTime()
-  }
   return Date.now() - tf.days * 86_400_000
 }
 
 // customRange = { from: 'YYYY-MM-DD', to: 'YYYY-MM-DD' } | null
-function applyTimePeriod(trades, period, customRange) {
+function applyTimePeriod(trades, period, customRange, offset = 0) {
   if (period === 'custom' && customRange?.from) {
     const fromMs = new Date(customRange.from + 'T00:00:00').getTime()
     const toMs   = customRange.to
@@ -295,9 +345,54 @@ function applyTimePeriod(trades, period, customRange) {
       return ts >= fromMs && ts <= toMs
     })
   }
+  // Navigierbar mit Offset → expliziter Range mit from/to (auch in Vergangenheit liegende Fenster).
+  if (isNavigable(period)) {
+    const r = getNavigableRange(period, offset)
+    if (!r) return trades
+    return trades.filter(t => {
+      if (!t.closeTime) return false
+      const ts = new Date(t.closeTime).getTime()
+      return ts >= r.from && ts <= r.to
+    })
+  }
+  // Rolling-Fenster (3M/6M).
   const cutoff = getPeriodCutoff(period)
   if (!cutoff) return trades
   return trades.filter(t => t.closeTime && new Date(t.closeTime).getTime() >= cutoff)
+}
+
+// Kurzes Label für den aktuell ausgewählten Range (z.B. "Mo 02.06.2026" oder "Juni 2026").
+function formatRangeLabel(period, offset, t) {
+  if (!isNavigable(period)) return null
+  const r = getNavigableRange(period, offset)
+  if (!r) return null
+  const from = new Date(r.from)
+  const kind = NAVIGABLE_PERIODS[period]
+  const pad  = (n) => String(n).padStart(2, '0')
+  const fmtDate = (d) => `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`
+  if (kind === 'day') {
+    if (offset === 0)  return t('common.today') + ' · ' + fmtDate(from)
+    if (offset === -1) return t('common.yesterday') + ' · ' + fmtDate(from)
+    return fmtDate(from)
+  }
+  if (kind === 'week') {
+    const to = new Date(r.to)
+    const range = `${pad(from.getDate())}.${pad(from.getMonth() + 1)}. – ${pad(to.getDate())}.${pad(to.getMonth() + 1)}.${to.getFullYear()}`
+    if (offset === 0)  return t('common.this_week') + ' · ' + range
+    if (offset === -1) return t('common.last_week') + ' · ' + range
+    return range
+  }
+  if (kind === 'month') {
+    const monthsDe = ['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember']
+    const monthsEn = ['January','February','March','April','May','June','July','August','September','October','November','December']
+    const isEn = (t('common.today') === 'Today')
+    const monthName = (isEn ? monthsEn : monthsDe)[from.getMonth()]
+    return `${monthName} ${from.getFullYear()}`
+  }
+  if (kind === 'year') {
+    return String(from.getFullYear())
+  }
+  return null
 }
 
 /* ─── Date Range Picker Popover ──────────────────────────── */
@@ -392,6 +487,7 @@ export default function Dashboard() {
   const [activeSym,   setActiveSym]   = useState(null)
   const [activeTag,   setActiveTag]   = useState('ALL')
   const [timePeriod,  setTimePeriod]  = useState('all')
+  const [periodOffset, setPeriodOffset] = useState(0)   // 0 = aktuelle Periode, -1 = vorherige
   const [customRange, setCustomRange] = useState(null)   // { from, to } | null
   const [showPicker,  setShowPicker]  = useState(false)
 
@@ -401,8 +497,8 @@ export default function Dashboard() {
     if (activeSym)               t = t.filter(x => x.symbol === activeSym)
     else if (activeCat !== 'alle') t = t.filter(x => getSymbolCategory(x.symbol) === activeCat)
     if (activeTag !== 'ALL')     t = t.filter(x => (x.tags || []).includes(activeTag))
-    return applyTimePeriod(t, timePeriod, customRange)
-  }, [effectiveTrades, activeCat, activeSym, activeTag, timePeriod, customRange])
+    return applyTimePeriod(t, timePeriod, customRange, periodOffset)
+  }, [effectiveTrades, activeCat, activeSym, activeTag, timePeriod, customRange, periodOffset])
 
   // Tags die tatsächlich in den (vor-Tag-)gefilterten Trades vorkommen
   const availableTags = useMemo(() => {
@@ -435,7 +531,7 @@ export default function Dashboard() {
   // pretation des ROI verzerren würde.
   const periodCutoff = timePeriod === 'custom' && customRange?.from
     ? new Date(customRange.from + 'T00:00:00').getTime()
-    : getPeriodCutoff(timePeriod)
+    : getPeriodCutoff(timePeriod, periodOffset)
   const balanceAtPeriodStart = useMemo(() => {
     const sincePnl = effectiveTrades.reduce((s, t) => {
       if (!t.closeTime) return s
@@ -515,12 +611,23 @@ export default function Dashboard() {
           )}
         </div>
         {/* Zeit-Filter */}
-        <div className="flex items-center gap-1 shrink-0">
+        <div className="flex flex-col items-end gap-1 shrink-0">
+        <div className="flex items-center gap-1">
+          {/* ◀ Pfeil — vorherige Periode (nur sichtbar bei navigierbaren Filtern) */}
+          {isNavigable(timePeriod) && (
+            <button
+              onClick={() => setPeriodOffset(o => o - 1)}
+              title={t('profile.prev_period') || 'Vorherige'}
+              className="p-1 rounded-md text-slate-500 hover:text-slate-200 hover:bg-[#1f2937] transition-colors"
+            >
+              <ChevronLeft size={14} />
+            </button>
+          )}
           <div className="flex items-center gap-1 bg-[#0d1117] border border-[#1f2937] rounded-lg p-1">
             {TIME_FILTERS.filter(tf => tf.id !== 'custom').map(tf => (
               <button
                 key={tf.id}
-                onClick={() => { setTimePeriod(tf.id); setCustomRange(null) }}
+                onClick={() => { setTimePeriod(tf.id); setCustomRange(null); setPeriodOffset(0) }}
                 className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all duration-150 select-none
                   ${timePeriod === tf.id
                     ? 'bg-[#10b981]/15 text-[#10b981] border border-[#10b981]/30'
@@ -531,6 +638,33 @@ export default function Dashboard() {
               </button>
             ))}
           </div>
+          {/* ▶ Pfeil — nächste Periode (deaktiviert wenn schon in der Gegenwart) */}
+          {isNavigable(timePeriod) && (
+            <button
+              onClick={() => setPeriodOffset(o => Math.min(0, o + 1))}
+              disabled={periodOffset >= 0}
+              title={t('profile.next_period') || 'Nächste'}
+              className={`p-1 rounded-md transition-colors ${
+                periodOffset >= 0
+                  ? 'text-slate-700 cursor-not-allowed'
+                  : 'text-slate-500 hover:text-slate-200 hover:bg-[#1f2937]'
+              }`}
+            >
+              <ChevronRight size={14} />
+            </button>
+          )}
+          {/* Heute-Button — nur sichtbar wenn nicht in der aktuellen Periode */}
+          {isNavigable(timePeriod) && periodOffset !== 0 && (
+            <button
+              onClick={() => setPeriodOffset(0)}
+              title={t('profile.go_to_today') || t('common.today')}
+              className="flex items-center gap-1 px-2 py-1 rounded-md border border-[#10b981]/30
+                bg-[#10b981]/10 text-[#10b981] text-[11px] font-medium hover:bg-[#10b981]/15
+                transition-colors"
+            >
+              <CalendarDays size={11} /> {t('common.today')}
+            </button>
+          )}
 
           {/* Custom Date Range Button */}
           <div className="relative">
@@ -565,6 +699,13 @@ export default function Dashboard() {
               />
             )}
           </div>
+        </div>
+        {/* Subtitle: zeigt den aktuell angesehenen Datumsbereich (nur navigierbare Perioden) */}
+        {isNavigable(timePeriod) && (
+          <div className="text-[10px] text-slate-500 font-mono pr-1">
+            {formatRangeLabel(timePeriod, periodOffset, t)}
+          </div>
+        )}
         </div>
       </div>
 
