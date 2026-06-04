@@ -932,11 +932,73 @@ export function buildAvgHoldByDay(trades) {
   return { rows, overallAvg, firstHalfAvg, secondHalfAvg, trendPct }
 }
 
+/* ─── Empirischer Dollar-Notional pro Trade ───────────────── */
+/**
+ * Schätzt den realen Dollar-Gegenwert (Notional) eines Trades —
+ * instrumentübergreifend vergleichbar. Kontraktgrößen variieren massiv
+ * (Aktie vs. Index-CFD vs. FX) und werden von MT5 historisch nicht
+ * geliefert, daher leiten wir den $-Wert pro Preis-Punkt EMPIRISCH aus
+ * den eigenen Fills ab:
+ *
+ *   profit = volume × priceMove × pointValue
+ *      ⟹  pointValue = profit / (volume × priceMove)
+ *
+ * Dann ist notional = volume × openPrice × pointValue. Der Median pro
+ * Symbol macht das robust gegen Commission/Swap-Rauschen und Ausreißer.
+ * Self-calibrating, keine hardcodierten Kontraktgrößen.
+ *
+ * Beispiel-Validierung (echte User-Fills):
+ *   AVGO  BUY 409.55→412.19, 4.2 lot, +$11.09 → pv = 11.09/(4.2×2.64) ≈ 1.0
+ *   NAS100 BUY +147 Punkte, 0.3 lot, +$44.19  → pv = 44.19/(0.3×147.3) ≈ 1.0
+ * → notional AVGO ≈ $1.720, NAS100 ≈ $9.087 (echte, vergleichbare Beträge).
+ */
+export function buildSymbolPointValues(trades) {
+  const bySym = {}
+  for (const t of trades) {
+    if (!t.symbol || !(t.volume > 0) || !(t.openPrice > 0) || t.closePrice == null) continue
+    const isSell = /sell/i.test(t.type || '')
+    const move = isSell ? (t.openPrice - t.closePrice) : (t.closePrice - t.openPrice)
+    if (Math.abs(move) < 1e-9) continue
+    const gross = t.profit || 0
+    if (gross === 0) continue
+    const pv = gross / (t.volume * move)
+    if (!isFinite(pv) || pv <= 0) continue
+    if (!bySym[t.symbol]) bySym[t.symbol] = []
+    bySym[t.symbol].push(pv)
+  }
+  const out = {}
+  for (const [sym, arr] of Object.entries(bySym)) {
+    arr.sort((a, b) => a - b)
+    out[sym] = arr[Math.floor(arr.length / 2)] // Median
+  }
+  return out
+}
+
+// Fallback-Notional wenn kein empirischer Point-Value ableitbar ist
+// (z.B. Symbol ohne closePrice oder ohne Bewegung): grobe Heuristik wie im
+// Risk-Tab — FX (6-stellig) = volume × 100k, sonst volume × openPrice.
+function fallbackNotional(t) {
+  const isFx = /^[A-Z]{6}(\.[a-z]+)?$/.test(t.symbol || '')
+  if (isFx) return t.volume * 100_000
+  return t.volume * (t.openPrice || 0)
+}
+
+function tradeNotional(t, pvMap) {
+  const pv = pvMap[t.symbol]
+  if (pv && t.openPrice > 0) return t.volume * t.openPrice * pv
+  return fallbackNotional(t)
+}
+
 /* ─── Position-Sizing-Konsistenz ──────────────────────────── */
 /**
- * Untersucht, ob die Positionsgröße (Volume als Proxy) je nach
- * vorherigem Ergebnis variiert — klassischer Indikator für
- * Revenge-Sizing oder Übermut.
+ * Untersucht, ob die Positionsgröße je nach vorherigem Ergebnis
+ * variiert — klassischer Indikator für Revenge-Sizing oder Übermut.
+ *
+ * WICHTIG: gemessen wird das reale DOLLAR-RISIKO (Notional via
+ * buildSymbolPointValues), NICHT die rohe Lot-Größe — Lot ist über
+ * Instrumente nicht vergleichbar (0.3 Lot Gold ≠ 10 Lot Aktie ≠ 0.1 FX).
+ * Der angezeigte Faktor "1.3× üblich" heißt: 30% mehr Dollar-Exposure als
+ * dein typischer Trade, instrumentübergreifend.
  *
  * Buckets:
  *  - opening:    erster Trade eines Tages (kein Vorgänger)
@@ -951,17 +1013,24 @@ export function buildSizingConsistency(trades) {
     .sort((a, b) => new Date(a.openTime) - new Date(b.openTime))
   if (sorted.length < 5) return null
 
+  // Reales Dollar-Notional pro Trade (instrumentübergreifend vergleichbar),
+  // empirisch aus den eigenen Fills kalibriert. relSize = notional eines
+  // Trades; die Bucket-Abweichung misst damit echtes Auf-/Absizen des
+  // Kapitaleinsatzes, nicht den Instrument-Mix.
+  const pvMap = buildSymbolPointValues(sorted)
+  const relSize = (t) => tradeNotional(t, pvMap)
+
   const avgLoss = (() => {
     const losses = sorted.filter(t => t.profit < 0).map(t => Math.abs(t.profit))
     return losses.length ? losses.reduce((s, n) => s + n, 0) / losses.length : 0
   })()
 
   const buckets = {
-    opening:      { volumes: [], wins: 0, count: 0, pnl: 0 },
-    afterWin:     { volumes: [], wins: 0, count: 0, pnl: 0 },
-    afterLoss:    { volumes: [], wins: 0, count: 0, pnl: 0 },
-    after2Loss:   { volumes: [], wins: 0, count: 0, pnl: 0 },
-    afterBigLoss: { volumes: [], wins: 0, count: 0, pnl: 0 },
+    opening:      { factors: [], wins: 0, count: 0, pnl: 0 },
+    afterWin:     { factors: [], wins: 0, count: 0, pnl: 0 },
+    afterLoss:    { factors: [], wins: 0, count: 0, pnl: 0 },
+    after2Loss:   { factors: [], wins: 0, count: 0, pnl: 0 },
+    afterBigLoss: { factors: [], wins: 0, count: 0, pnl: 0 },
   }
 
   let consecutiveLosses = 0
@@ -988,7 +1057,7 @@ export function buildSizingConsistency(trades) {
     }
 
     const b = buckets[bucketName]
-    b.volumes.push(t.volume)
+    b.factors.push(relSize(t))
     b.count++
     if (t.profit > 0) b.wins++
     b.pnl += netPnl(t)
@@ -997,17 +1066,21 @@ export function buildSizingConsistency(trades) {
     else if (t.profit > 0) consecutiveLosses = 0
   }
 
-  const allVolumes = sorted.map(t => t.volume)
-  const overallAvg = allVolumes.reduce((s, n) => s + n, 0) / allVolumes.length
+  // overallAvg ist das durchschnittliche Dollar-Notional über ALLE Trades.
+  const allNotionals = sorted.map(relSize)
+  const overallAvg = allNotionals.reduce((s, n) => s + n, 0) / allNotionals.length
 
   const result = Object.entries(buckets).map(([id, b]) => {
-    if (b.count === 0) return { id, count: 0, avgVolume: 0, winRate: 0, pnl: 0, deviationPct: 0 }
-    const avgVolume = b.volumes.reduce((s, n) => s + n, 0) / b.volumes.length
-    const deviationPct = overallAvg > 0 ? ((avgVolume - overallAvg) / overallAvg) * 100 : 0
+    if (b.count === 0) return { id, count: 0, avgFactor: 0, avgNotional: 0, winRate: 0, pnl: 0, deviationPct: 0 }
+    const avgNotional = b.factors.reduce((s, n) => s + n, 0) / b.factors.length
+    // Faktor = Bucket-Exposure relativ zum Gesamt-Schnitt (1.0 = wie üblich).
+    const avgFactor = overallAvg > 0 ? avgNotional / overallAvg : 1
+    const deviationPct = overallAvg > 0 ? ((avgNotional - overallAvg) / overallAvg) * 100 : 0
     return {
       id,
       count: b.count,
-      avgVolume,
+      avgFactor,
+      avgNotional,
       winRate: (b.wins / b.count) * 100,
       pnl: b.pnl,
       deviationPct,
@@ -1018,7 +1091,8 @@ export function buildSizingConsistency(trades) {
   const maxDeviation = Math.max(...result.filter(r => r.count >= 3).map(r => Math.abs(r.deviationPct)), 0)
 
   return {
-    overallAvgVolume: overallAvg,
+    overallAvgFactor: 1, // Referenz: alle Buckets sind relativ zu 1.0× normiert
+    overallAvgNotional: overallAvg,
     buckets: result,
     maxDeviation,
   }
@@ -1245,32 +1319,26 @@ export function buildMaeRiskStats(trades, mfeArchive, accountBalance = 10000) {
  * ohne Stop-Loss getradet wird, da das eigentliche Risiko dann durch
  * Hebel-Belegung definiert ist (Margin-Call-Distanz).
  *
- * Notional-Schätzung:
- *  - Forex (6-stelliges Symbol): notional = volume × openPrice × 100_000
- *  - Indizes/Aktien/Crypto: notional = volume × openPrice
- *
- * Das ist eine Näherung — für detaillierte Margin-Werte müsste MT5
- * pro Trade die Margin liefern, was historisch nicht der Fall ist.
+ * Notional wird über buildSymbolPointValues/tradeNotional ermittelt: der
+ * $-Wert pro Punkt wird empirisch aus den eigenen Fills kalibriert, was
+ * Kontraktgröße UND Fremdwährung (z.B. JPY-notierter Nikkei225) automatisch
+ * korrekt in Kontowährung umrechnet. Fällt auf eine grobe Heuristik zurück,
+ * wenn für ein Symbol kein Point-Value ableitbar ist.
  */
 export function buildMarginExposure(trades, { leverage = 100, accountBalance = 10000 } = {}) {
-  // Forex erkennt: 6-stelliges Symbol (z.B. EURUSD, EURJPY.p). Bei FX ist der
-  // Notional-Wert volume × 100k Base-Currency — der Preis ist nur Quote-Wert
-  // (z.B. EURJPY=185 heißt "1 EUR = 185 JPY"), darf NICHT auf das Notional
-  // multipliziert werden, sonst rechnen wir den Hebel um Faktor 185 zu groß.
-  const isLikelyForex = (sym) => /^[A-Z]{6}(\.[a-z]+)?$/.test(sym || '') || /^[A-Z]{3}[A-Z]{3}$/.test(sym || '')
   const valid = trades.filter(t => t.openPrice > 0 && t.volume > 0)
   if (!valid.length) return null
 
+  // Notional = realer Dollar-Gegenwert, empirisch aus den eigenen Fills
+  // kalibriert (siehe buildSymbolPointValues). Das löst sowohl die
+  // Kontraktgrößen- als auch die Fremdwährungs-Frage automatisch: der
+  // $/Punkt wird aus profit (Kontowährung) rückgerechnet, daher ist z.B.
+  // ein in JPY notierter Nikkei225 bereits korrekt in USD umgerechnet.
+  // Fallback (tradeNotional): FX 6-stellig = vol×100k, sonst vol×price.
+  const pvMap = buildSymbolPointValues(trades)
+
   const enriched = valid.map(t => {
-    let notional
-    if (isLikelyForex(t.symbol)) {
-      // Forex: Approximation, 1 Lot = 100k Base ≈ 100k USD (genauer wäre
-      // Base/USD-Rate, aber für Risiko-Überblick ausreichend)
-      notional = t.volume * 100_000
-    } else {
-      // Indizes/Aktien/Crypto/Commodities: Notional ≈ Volume × Preis
-      notional = t.volume * t.openPrice
-    }
+    const notional  = tradeNotional(t, pvMap)
     const margin    = notional / leverage
     const marginPct = accountBalance > 0 ? (margin / accountBalance) * 100 : 0
     return {
@@ -1319,9 +1387,11 @@ export function buildMarginExposure(trades, { leverage = 100, accountBalance = 1
   const avgNotional = enriched.reduce((s, t) => s + t.notional, 0) / enriched.length
   const liquidationMovePct = avgNotional > 0 ? (accountBalance / avgNotional) * 100 : 0
 
-  // Volumen-Konsistenz: Variations-Koeffizient
-  const meanVol = enriched.reduce((s, t) => s + t.volume, 0) / enriched.length
-  const stdVol = Math.sqrt(enriched.reduce((s, t) => s + (t.volume - meanVol) ** 2, 0) / enriched.length)
+  // Sizing-Konsistenz: Variations-Koeffizient des Dollar-NOTIONALS (nicht
+  // roher Lot — Lot ist über Instrumente unvergleichbar, 14 Lot Nikkei vs
+  // 0.1 Lot FX würden sonst ein Riesen-CV vortäuschen).
+  const meanVol = enriched.reduce((s, t) => s + t.notional, 0) / enriched.length
+  const stdVol = Math.sqrt(enriched.reduce((s, t) => s + (t.notional - meanVol) ** 2, 0) / enriched.length)
   const volumeCV = meanVol > 0 ? stdVol / meanVol : 0
 
   return {

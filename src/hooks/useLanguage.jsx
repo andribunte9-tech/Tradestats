@@ -486,8 +486,8 @@ const TRANSLATIONS = {
 
     // ── Sizing-Konsistenz ──────────────────────────────────────
     'sc.title':                 'Sizing-Konsistenz',
-    'sc.subtitle':              'Ø Position: {avg} Lot · maximale Abweichung: {dev}%',
-    'sc.info':                  'Vergleicht deine durchschnittliche Position-Größe (Lot-Volumen) je nach Vor-Trade-Situation. Statistisch dürftest du immer gleich viel riskieren — wenn du nach Verlusten plötzlich größer oder kleiner sizierst, ist das emotionsgetrieben und untergräbt deine Edge. Größter Hebel: Sizing-Drift erklärt oft die schmerzhaftesten Drawdowns.',
+    'sc.subtitle':              'Dollar-Risiko normalisiert · maximale Abweichung: {dev}%',
+    'sc.info':                  'Vergleicht dein reales DOLLAR-Risiko (Notional) je nach Vor-Trade-Situation — Faktor 1.0× = dein übliches Exposure pro Trade. Wir messen Dollar statt Lot, weil Lot über Instrumente unvergleichbar ist (0.3 Lot Index ≠ 10 Lot Aktie ≠ 0.1 FX). Der Dollar-Gegenwert wird automatisch aus deinen eigenen Fills kalibriert ($/Punkt = Gewinn ÷ (Volume × Preisbewegung)), keine fixen Kontraktgrößen. Statistisch dürftest du immer gleich viel riskieren — wenn du nach Verlusten plötzlich größer oder kleiner sizierst, ist das emotionsgetrieben und untergräbt deine Edge. Größter Hebel: Sizing-Drift erklärt oft die schmerzhaftesten Drawdowns.',
     'sc.bucket.opening':        'Eröffnungs-Trade',
     'sc.bucket.afterWin':       'Nach Gewinn',
     'sc.bucket.afterLoss':      'Nach Verlust',
@@ -500,9 +500,9 @@ const TRANSLATIONS = {
     'sc.verdict.good.title':    'Konsistent',
     'sc.verdict.good.body':     'Nur {dev}% Abweichung zwischen den Buckets. Du sizierst diszipliniert unabhängig von Vorgängern.',
     'sc.trades_count':          '{n} Trade{plural}',
-    'sc.lot_unit':              '{n} Lot',
+    'sc.size_factor':           '{n}× üblich',
     'sc.wr':                    'WR',
-    'sc.legend':                'Senkrechter Strich = Durchschnitt aller Trades. Balken-Position zeigt Abweichung. Rot ab ±25%, Gelb ab ±10%.',
+    'sc.legend':                'Faktor 1.0× = dein übliches Dollar-Exposure (reales Notional, aus deinen Fills kalibriert — instrumentübergreifend vergleichbar). Senkrechter Strich = Schnitt aller Trades. Rot ab ±25%, Gelb ab ±10%.',
 
     // ── Konkurrierende Positionen ──────────────────────────────
     'cp.title':                 'Konkurrierende Positionen',
@@ -1193,8 +1193,8 @@ const TRANSLATIONS = {
 
     // ── Sizing Consistency ────────────────────────────────────
     'sc.title':                 'Sizing consistency',
-    'sc.subtitle':              'Avg. position: {avg} lot · max deviation: {dev}%',
-    'sc.info':                  'Compares your average position size (lot volume) based on prior-trade context. Statistically you should always risk the same — if you size up or down after losses, that\'s emotion-driven and erodes your edge. Biggest lever: sizing drift often explains the most painful drawdowns.',
+    'sc.subtitle':              'Dollar risk normalized · max deviation: {dev}%',
+    'sc.info':                  'Compares your real DOLLAR risk (notional) based on prior-trade context — factor 1.0× = your usual exposure per trade. We measure dollars, not lots, because lots aren\'t comparable across instruments (0.3 lot index ≠ 10 lot stock ≠ 0.1 FX). The dollar value is auto-calibrated from your own fills ($/point = profit ÷ (volume × price move)), no fixed contract sizes. Statistically you should always risk the same — if you size up or down after losses, that\'s emotion-driven and erodes your edge. Biggest lever: sizing drift often explains the most painful drawdowns.',
     'sc.bucket.opening':        'Opening trade',
     'sc.bucket.afterWin':       'After win',
     'sc.bucket.afterLoss':      'After loss',
@@ -1207,9 +1207,9 @@ const TRANSLATIONS = {
     'sc.verdict.good.title':    'Consistent',
     'sc.verdict.good.body':     'Only {dev}% deviation between buckets. You size with discipline regardless of prior trades.',
     'sc.trades_count':          '{n} trade{plural}',
-    'sc.lot_unit':              '{n} lot',
+    'sc.size_factor':           '{n}× usual',
     'sc.wr':                    'WR',
-    'sc.legend':                'Vertical line = overall average across all trades. Bar position shows deviation. Red above ±25%, yellow above ±10%.',
+    'sc.legend':                'Factor 1.0× = your usual dollar exposure (real notional, calibrated from your fills — comparable across instruments). Vertical line = average across all trades. Red above ±25%, yellow above ±10%.',
 
     // ── Concurrent Positions ──────────────────────────────────
     'cp.title':                 'Concurrent positions',

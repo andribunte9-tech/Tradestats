@@ -1815,7 +1815,7 @@ function SizingConsistencyCard({ trades }) {
         <SectionTitle
           icon={Scaling}
           title={t('sc.title')}
-          subtitle={t('sc.subtitle', { avg: data.overallAvgVolume.toFixed(2), dev })}
+          subtitle={t('sc.subtitle', { dev })}
           color="#ec4899"
           info={t('sc.info')}
         />
@@ -1834,8 +1834,8 @@ function SizingConsistencyCard({ trades }) {
         <div className="space-y-2">
           {data.buckets.filter(b => b.count > 0).map(b => {
             const meta = SIZING_BUCKET_META[b.id]
-            const widthPct = data.overallAvgVolume > 0
-              ? Math.min(100, (b.avgVolume / (data.overallAvgVolume * 2)) * 100)
+            const widthPct = data.overallAvgFactor > 0
+              ? Math.min(100, (b.avgFactor / (data.overallAvgFactor * 2)) * 100)
               : 50
             const devColor = Math.abs(b.deviationPct) > 25 ? '#ef4444' : Math.abs(b.deviationPct) > 10 ? '#f59e0b' : '#10b981'
             return (
@@ -1846,7 +1846,7 @@ function SizingConsistencyCard({ trades }) {
                     <span className="text-[10px] text-slate-500">{t('sc.trades_count', { n: b.count, plural: b.count !== 1 ? 's' : '' })}</span>
                   </div>
                   <div className="flex items-center gap-3 shrink-0">
-                    <span className="font-mono text-[12px] text-slate-300">{t('sc.lot_unit', { n: b.avgVolume.toFixed(2) })}</span>
+                    <span className="font-mono text-[12px] text-slate-300">{t('sc.size_factor', { n: b.avgFactor.toFixed(2) })}</span>
                     {b.count >= 3 && (
                       <span className="font-mono text-[11px] font-semibold" style={{ color: devColor }}>
                         {b.deviationPct >= 0 ? '+' : ''}{b.deviationPct.toFixed(0)}%
