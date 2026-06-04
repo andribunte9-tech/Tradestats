@@ -396,7 +396,7 @@ function MarginExposureCard({ trades, leverage, accountBalance }) {
       : { color: '#10b981', label: t('rt.margin.verdict.good.title'), msg: t('rt.margin.verdict.good.body', { avg }) }
 
   const liqColor = data.liquidationMovePct > 10 ? '#10b981' : data.liquidationMovePct > 3 ? '#f59e0b' : '#ef4444'
-  const cvColor  = data.volumeCV < 0.3 ? '#10b981' : data.volumeCV < 0.7 ? '#f59e0b' : '#ef4444'
+  const cvColor  = data.volumeCV < 0.6 ? '#10b981' : data.volumeCV < 1.2 ? '#f59e0b' : '#ef4444'
 
   return (
     <div className="card">
@@ -452,7 +452,7 @@ function MarginExposureCard({ trades, leverage, accountBalance }) {
               <span className="text-sm font-mono font-bold" style={{ color: cvColor }}>CV {data.volumeCV.toFixed(2)}</span>
             </div>
             <p className="text-[10px] text-slate-500 leading-relaxed">
-              {data.volumeCV < 0.3 ? t('rt.margin.vol_cv_low') : data.volumeCV < 0.7 ? t('rt.margin.vol_cv_med') : t('rt.margin.vol_cv_high')}
+              {data.volumeCV < 0.6 ? t('rt.margin.vol_cv_low') : data.volumeCV < 1.2 ? t('rt.margin.vol_cv_med') : t('rt.margin.vol_cv_high')}
             </p>
           </div>
           <div className="rounded-xl border border-[#1f2937] bg-[#0d1117] p-3">
