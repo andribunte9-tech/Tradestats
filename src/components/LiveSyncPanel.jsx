@@ -283,46 +283,70 @@ function TpProgressBar({ progress }) {
   const { signedPct, mfePct, maePct } = progress
   const half = (n) => Math.max(0, Math.min(50, Math.abs(n) / 2))   // jede Seite max 50% der Bar
 
-  const tipParts = []
-  tipParts.push(`${signedPct >= 0 ? '+' : ''}${signedPct.toFixed(0)}% → TP`)
-  if (mfePct != null && mfePct > 0) tipParts.push(`MFE: +${mfePct.toFixed(0)}%`)
-  if (maePct != null && maePct < 0) tipParts.push(`MAE: ${maePct.toFixed(0)}%`)
+  // Sekundär-Werte nur zeigen, wenn sie sich nennenswert vom Current unterscheiden
+  // (sonst wäre die Anzeige redundant: "+18% · +18%")
+  const showMfe = mfePct != null && mfePct > Math.max(signedPct, 0) + 3
+  const showMae = maePct != null && maePct < Math.min(signedPct, 0) - 3
+
+  const fmt = (n) => `${n >= 0 ? '+' : ''}${n.toFixed(0)}%`
+  const currentColor = signedPct >= 0 ? '#10b981' : '#ef4444'
+
+  const tipParts = [`${fmt(signedPct)} → TP`]
+  if (mfePct != null && mfePct > 0) tipParts.push(`MFE: ${fmt(mfePct)}`)
+  if (maePct != null && maePct < 0) tipParts.push(`MAE: ${fmt(maePct)}`)
 
   return (
-    <div
-      className="relative h-1.5 bg-[#1f2937] rounded-full overflow-hidden min-w-[60px] max-w-[100px]"
-      title={tipParts.join('  ·  ')}
-    >
-      {/* Center-Divider */}
-      <div className="absolute top-0 bottom-0 w-px bg-slate-600" style={{ left: '50%' }} />
+    <div className="flex items-center gap-1.5" title={tipParts.join('  ·  ')}>
+      {/* Die Bar selbst */}
+      <div className="relative h-1.5 bg-[#1f2937] rounded-full overflow-hidden min-w-[60px] max-w-[80px] flex-shrink-0">
+        {/* Center-Divider */}
+        <div className="absolute top-0 bottom-0 w-px bg-slate-600" style={{ left: '50%' }} />
 
-      {/* Ghost-MFE — heller grüner Schweif, zeigt wie weit der Trade mal vorn war */}
-      {mfePct != null && mfePct > 0 && (
-        <div
-          className="absolute top-0 bottom-0 bg-[#10b981]"
-          style={{ left: '50%', width: `${half(mfePct)}%`, opacity: 0.25 }}
-        />
-      )}
-      {/* Ghost-MAE — heller roter Schweif, zeigt wie tief im Minus es mal war */}
-      {maePct != null && maePct < 0 && (
-        <div
-          className="absolute top-0 bottom-0 bg-[#ef4444]"
-          style={{ right: '50%', width: `${half(maePct)}%`, opacity: 0.25 }}
-        />
-      )}
-      {/* Solid: aktueller Stand (überlagert die Ghosts) */}
-      {signedPct > 0 && (
-        <div
-          className="absolute top-0 bottom-0 bg-[#10b981] transition-all"
-          style={{ left: '50%', width: `${half(signedPct)}%` }}
-        />
-      )}
-      {signedPct < 0 && (
-        <div
-          className="absolute top-0 bottom-0 bg-[#ef4444] transition-all"
-          style={{ right: '50%', width: `${half(signedPct)}%` }}
-        />
-      )}
+        {/* Ghost-MFE */}
+        {mfePct != null && mfePct > 0 && (
+          <div
+            className="absolute top-0 bottom-0 bg-[#10b981]"
+            style={{ left: '50%', width: `${half(mfePct)}%`, opacity: 0.25 }}
+          />
+        )}
+        {/* Ghost-MAE */}
+        {maePct != null && maePct < 0 && (
+          <div
+            className="absolute top-0 bottom-0 bg-[#ef4444]"
+            style={{ right: '50%', width: `${half(maePct)}%`, opacity: 0.25 }}
+          />
+        )}
+        {/* Solid: aktueller Stand */}
+        {signedPct > 0 && (
+          <div
+            className="absolute top-0 bottom-0 bg-[#10b981] transition-all"
+            style={{ left: '50%', width: `${half(signedPct)}%` }}
+          />
+        )}
+        {signedPct < 0 && (
+          <div
+            className="absolute top-0 bottom-0 bg-[#ef4444] transition-all"
+            style={{ right: '50%', width: `${half(signedPct)}%` }}
+          />
+        )}
+      </div>
+
+      {/* Zahlen-Block: aktueller Stand groß, MFE/MAE als dezente Sekundär-Werte */}
+      <div className="flex flex-col leading-tight font-mono">
+        <span className="text-[10px] font-semibold" style={{ color: currentColor }}>
+          {fmt(signedPct)}
+        </span>
+        {showMfe && (
+          <span className="text-[8px] text-[#10b981]/60 flex items-center gap-0.5">
+            <span className="text-[7px]">▲</span> {fmt(mfePct)}
+          </span>
+        )}
+        {showMae && (
+          <span className="text-[8px] text-[#ef4444]/60 flex items-center gap-0.5">
+            <span className="text-[7px]">▼</span> {fmt(maePct)}
+          </span>
+        )}
+      </div>
     </div>
   )
 }
