@@ -359,6 +359,13 @@ def polling_loop():
             state["positions"] = map_positions(mt5.positions_get())
 
             # ── MFE/MAE: track high/low watermark per open position ───────
+            #  - mfe/mae:           historisches Max/Min P&L (in $) seit Position-Open
+            #  - mfePrice/maePrice: Preis zum Zeitpunkt des Peaks/Tiefpunkts
+            #
+            # Die Preise sind die zuverlässigere Quelle für das Frontend:
+            # P&L driftet bei langen Positionen durch Swap/Commission, der Preis
+            # bleibt unabhängig stabil. Frontend nutzt daher mfePrice/maePrice,
+            # falls vorhanden — $-Werte sind nur Anzeige/Anekdote.
             now_iso = datetime.now(timezone.utc).isoformat()
             live_ids = set()
             for p in state["positions"]:
@@ -366,17 +373,29 @@ def polling_loop():
                 if not pid:
                     continue
                 live_ids.add(pid)
-                pnl = (p.get("profit") or 0) + (p.get("swap") or 0) + (p.get("commission") or 0)
+                pnl    = (p.get("profit") or 0) + (p.get("swap") or 0) + (p.get("commission") or 0)
+                price  = p.get("currentPrice")
+                is_buy = (p.get("type") == "BUY")
                 rec = mfe_mae_live.get(pid)
                 if not rec:
                     mfe_mae_live[pid] = {
                         "mfe": pnl, "mae": pnl,
-                        "openTime": p.get("openTime"),
+                        "mfePrice": price, "maePrice": price,
+                        "openTime":   p.get("openTime"),
                         "lastUpdate": now_iso,
                     }
                 else:
-                    if pnl > rec["mfe"]: rec["mfe"] = pnl
-                    if pnl < rec["mae"]: rec["mae"] = pnl
+                    # Favorable bei BUY = höherer Preis, bei SELL = niedrigerer Preis.
+                    favorable_price  = (price > rec.get("mfePrice", price)) if is_buy else (price < rec.get("mfePrice", price))
+                    adverse_price    = (price < rec.get("maePrice", price)) if is_buy else (price > rec.get("maePrice", price))
+                    if pnl > rec["mfe"]:
+                        rec["mfe"] = pnl
+                    if favorable_price or rec.get("mfePrice") is None:
+                        rec["mfePrice"] = price
+                    if pnl < rec["mae"]:
+                        rec["mae"] = pnl
+                    if adverse_price or rec.get("maePrice") is None:
+                        rec["maePrice"] = price
                     rec["lastUpdate"] = now_iso
 
             # Detect closed positions → move watermarks to persistent archive
@@ -388,6 +407,8 @@ def polling_loop():
                     mfe_mae_archive[archive_key] = {
                         "mfe": round(mfe_mae_live[pid]["mfe"], 2),
                         "mae": round(mfe_mae_live[pid]["mae"], 2),
+                        "mfePrice": mfe_mae_live[pid].get("mfePrice"),
+                        "maePrice": mfe_mae_live[pid].get("maePrice"),
                         "openTime": mfe_mae_live[pid]["openTime"],
                         "closedAt": now_iso,
                     }

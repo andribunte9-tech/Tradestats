@@ -251,21 +251,47 @@ function computeTpProgress({ openPrice, currentPrice, tp, type, netPnl }, mfeMae
   const tpDist = Math.abs(tp - openPrice)
   if (tpDist <= 0) return null
 
-  const signedPct = (signedCurrDist / tpDist) * 100   // kann negativ sein
+  // Hilfs-Funktion: Preis → signiertes % Richtung TP (positiv = Richtung Profit)
+  const priceToPct = (price) => {
+    if (price == null) return null
+    const dist = (price - openPrice) * dirSign
+    return (dist / tpDist) * 100
+  }
+
+  const signedPct = priceToPct(currentPrice) ?? 0
 
   let mfePct = null
   let maePct = null
-  // Konversion $ → % via netPnl-Skala (nur möglich wenn beide nicht 0 sind).
-  if (mfeMaeLive && netPnl && Math.abs(signedCurrDist) > 1e-12) {
-    const factor = signedPct / netPnl   // % pro $
-    if (mfeMaeLive.mfe != null) mfePct = Math.max(0, Math.min(100, mfeMaeLive.mfe * factor))
-    if (mfeMaeLive.mae != null) maePct = Math.max(-100, Math.min(0, mfeMaeLive.mae * factor))
+
+  // Bevorzugte Quelle: gespeicherte Peak/Trough-Preise (vom Backend getrackt).
+  // Diese sind stabil über die Position-Lebensdauer — sie ändern sich nur wenn
+  // wirklich ein neuer Peak/Tiefpunkt erreicht wird.
+  if (mfeMaeLive?.mfePrice != null) {
+    const p = priceToPct(mfeMaeLive.mfePrice)
+    if (p != null && p > 0) mfePct = Math.min(100, p)
+  }
+  if (mfeMaeLive?.maePrice != null) {
+    const p = priceToPct(mfeMaeLive.maePrice)
+    if (p != null && p < 0) maePct = Math.max(-100, p)
+  }
+
+  // Fallback (alte Daten ohne Preis): $ → % via netPnl-Skala. Drift möglich
+  // wegen Swap/Commission, daher nur wenn keine Preis-Info da ist.
+  if (mfePct == null && mfeMaeLive?.mfe != null && netPnl && Math.abs(signedCurrDist) > 1e-12) {
+    const factor = signedPct / netPnl
+    const p = mfeMaeLive.mfe * factor
+    if (p > 0) mfePct = Math.min(100, p)
+  }
+  if (maePct == null && mfeMaeLive?.mae != null && netPnl && Math.abs(signedCurrDist) > 1e-12) {
+    const factor = signedPct / netPnl
+    const p = mfeMaeLive.mae * factor
+    if (p < 0) maePct = Math.max(-100, p)
   }
 
   return {
     signedPct: Math.max(-100, Math.min(100, signedPct)),
-    mfePct,   // positiv (oder null)
-    maePct,   // negativ (oder null)
+    mfePct,
+    maePct,
   }
 }
 
