@@ -169,21 +169,13 @@ function ForecastCard({ trades, accountBalance }) {
         )}
       </div>
       <div className="p-4 space-y-4">
-        {/* Realistic-Cap Warnung */}
-        {data.wasCapped && compound && (
-          <div className="rounded-lg border border-[#f59e0b]/40 bg-[#f59e0b]/10 p-3 flex items-start gap-3">
-            <AlertTriangle size={14} className="text-[#f59e0b] shrink-0 mt-0.5" />
-            <div className="text-[12px] text-slate-300 leading-relaxed">
-              <span className="font-semibold text-[#f59e0b]">{t('fc.cap_lead')}</span>{' '}
-              {t('fc.cap_body', {
-                daily:  (data.rawMeanRate * 100).toFixed(2),
-                weekly: ((Math.pow(1 + data.rawMeanRate, 5) - 1) * 100).toFixed(1),
-                annual: ((Math.pow(1 + data.rawMeanRate, 252) - 1) * 100).toFixed(0),
-                capW:   (data.realisticWeeklyCap * 100).toFixed(0),
-                capD:   (data.realisticCap * 100).toFixed(2),
-                capA:   ((Math.pow(1 + data.realisticCap, 252) - 1) * 100).toFixed(0),
-              })}
-            </div>
+        {/* Basis-Hinweis: echte Wochen-Performance */}
+        {compound && data.weeklyRate != null && (
+          <div className="rounded-lg border border-[#1f2937] bg-[#0d1117] p-3 text-[12px] text-slate-400 leading-relaxed">
+            {t('fc.basis_real', {
+              weekly: (data.weeklyRate * 100).toFixed(1),
+              daily:  (data.meanRate * 100).toFixed(2),
+            })}
           </div>
         )}
         {/* Controls */}
@@ -2372,52 +2364,25 @@ export default function AnalysePage() {
       {/* AI Coach — ganz oben für schnellen Überblick */}
       <CoachCard trades={trades} accountBalance={accountBalance} mfeArchive={mfeArchive} />
 
-      {/* Prognose + Coach */}
+      {/* Prognose + Wochenrückblick */}
       <ForecastCard trades={trades} accountBalance={accountBalance} />
       <WeeklyReportCard trades={trades} />
 
-      {/* Jahres-Heatmap */}
-      <YearlyHeatmapCard trades={trades} />
-
-      {/* Edge */}
+      {/* Edge + Verhalten */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
         <ParetoCard trades={trades} />
-        <WhatIfCard trades={trades} />
+        <StreakStatsCard trades={trades} />
       </div>
       <HoldTimeScatterCard trades={trades} riskAmount={riskAmount} />
       <HoldDurationTrendCard trades={trades} />
 
-      {/* Best vs Worst */}
-      <BestVsWorstCard trades={trades} />
-
-      {/* Verhalten */}
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <StreakStatsCard trades={trades} />
-        <SequentialCard trades={trades} />
-      </div>
+      {/* Sizing */}
       <SizingConsistencyCard trades={trades} />
+
+      {/* Risiko-Verlauf */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <ConcurrentPositionsCard trades={trades} />
-        <TradingFrequencyCard trades={trades} />
-      </div>
-      <HeatmapCard trades={trades} />
-
-      {/* MFE/MAE + Fehler */}
-      <MfeMaeCard trades={trades} mfeArchive={mfeArchive} riskAmount={riskAmount} />
-      <MistakeCostCard trades={trades} />
-
-      {/* Risiko */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-        <UlcerCard trades={trades} accountBalance={accountBalance} />
         <RecoveryCard trades={trades} accountBalance={accountBalance} />
         <ConsistencyCard trades={trades} />
-      </div>
-      <RiskOfRuinCard trades={trades} accountBalance={accountBalance} />
-
-      {/* Mustererkennung */}
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <TagComboCard trades={trades} />
-        <VolNormCard trades={trades} />
       </div>
     </div>
   )

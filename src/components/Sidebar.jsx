@@ -1,6 +1,6 @@
 import {
   LayoutDashboard, BookOpen, Calendar, Upload, Download,
-  ChevronRight, NotebookPen, ShieldAlert, User, BarChart3, Library,
+  ChevronRight, NotebookPen, ShieldAlert, User, BarChart3, Radio,
 } from 'lucide-react'
 import { LiveStatusBadge } from './LiveSyncPanel'
 import TSLogo from '../assets/TSLogo'
@@ -12,8 +12,8 @@ const NAV_ITEMS = [
   { id: 'daily-journal', key: 'nav.daily_journal', icon: NotebookPen },
   { id: 'calendar',      key: 'nav.calendar',      icon: Calendar },
   { id: 'analyse',       key: 'nav.analyse',       icon: BarChart3 },
-  { id: 'setups',        key: 'nav.setups',        icon: Library },
   { id: 'risk',          key: 'nav.risk',          icon: ShieldAlert },
+  { id: 'signals',       key: 'nav.signals',       icon: Radio },
   { id: 'profile',       key: 'nav.profile',       icon: User },
   { id: 'import',        key: 'nav.import',        icon: Upload },
   { id: 'export',        key: 'nav.export',        icon: Download },

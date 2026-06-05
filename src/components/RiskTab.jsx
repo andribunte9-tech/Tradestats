@@ -9,9 +9,23 @@ import { useTrades } from '../hooks/useTrades'
 import { usePrivacyMode, Pvt } from '../hooks/usePrivacyMode'
 import { useLiveSync } from '../hooks/useLiveSync'
 import { useLanguage } from '../hooks/useLanguage'
-import { buildMaeRiskStats, buildMarginExposure } from '../utils/analytics'
+import { buildMaeRiskStats, buildMarginExposure, matchSignalsToTrades, buildSymbolPointValues } from '../utils/analytics'
+import { useSignals } from '../hooks/useSignals'
 
-const RISK_KEY = 'tradestats_risk_percent'
+const PROFILE_KEY = 'tradestats_risk_profile'
+
+// SmartTrader-Basis-Lot-Logik: Standard-Lot pro 1000$ Kontostand je Risikoprofil.
+const RISK_PROFILES = [
+  { id: 'sehr_konservativ', labelKey: 'rt.profile.very_cons', factor: 0.030 },
+  { id: 'konservativ',      labelKey: 'rt.profile.cons',      factor: 0.050 },
+  { id: 'ausgewogen',       labelKey: 'rt.profile.balanced',  factor: 0.075 },
+  { id: 'aggressiv',        labelKey: 'rt.profile.aggr',      factor: 0.100 },
+  { id: 'sehr_aggressiv',   labelKey: 'rt.profile.very_aggr', factor: 0.150 },
+]
+const PROFILE_COLORS = {
+  sehr_konservativ: '#10b981', konservativ: '#22d3ee', ausgewogen: '#3b82f6',
+  aggressiv: '#f59e0b', sehr_aggressiv: '#ef4444',
+}
 
 /* ─── R-Multiple Farbe ───────────────────────────────────── */
 function rColor(r) {
@@ -506,185 +520,268 @@ function SCard({ icon: Icon, label, value, sub, color = 'text-white', iconColor 
   )
 }
 
+/* ─── Basis-Lot-Rechner (SmartTrader-Logik) ──────────────── */
+function BaseLotCalculatorCard({ balance, profileId, onSelect, standardLot, t }) {
+  const profile = RISK_PROFILES.find(p => p.id === profileId) || RISK_PROFILES[2]
+  const lotFor = f => Math.max(0, (balance / 1000) * f)
+  const accent = PROFILE_COLORS[profileId] || '#3b82f6'
+  return (
+    <div className="card">
+      <div className="card-header">
+        <div className="flex items-center gap-2">
+          <Anchor size={14} className="text-[#3b82f6]" />
+          <h3 className="text-sm font-semibold text-slate-200">{t('rt.baselot.title')}</h3>
+        </div>
+        <span className="text-xs text-slate-500">
+          {t('rt.baselot.balance')}: <span className="font-mono text-slate-300">${balance.toFixed(0)}</span>
+        </span>
+      </div>
+      <div className="p-4 space-y-4">
+        <div className="rounded-xl border p-4" style={{ borderColor: accent + '40', backgroundColor: accent + '0c' }}>
+          <p className="text-[11px] uppercase tracking-wide text-slate-500 mb-1">{t('rt.baselot.standard')}</p>
+          <p className="text-3xl font-mono font-bold text-white">
+            {standardLot.toFixed(2)} <span className="text-base text-slate-400">Lot</span>
+          </p>
+          <p className="text-[11px] text-slate-500 mt-1">
+            {t('rt.baselot.profile')}: <span style={{ color: accent }}>{t(profile.labelKey)}</span>
+            {' · '}{profile.factor.toFixed(3)} / 1000$
+          </p>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+          {RISK_PROFILES.map(p => {
+            const active = p.id === profileId
+            const c = PROFILE_COLORS[p.id]
+            return (
+              <button key={p.id} onClick={() => onSelect(p.id)}
+                className="rounded-lg border p-2.5 text-left transition-colors hover:border-[#374151]"
+                style={{ borderColor: active ? c : '#1f2937', backgroundColor: active ? c + '15' : '#0d1117' }}>
+                <p className="text-[10px] font-semibold leading-tight" style={{ color: active ? c : '#94a3b8' }}>{t(p.labelKey)}</p>
+                <p className="text-sm font-mono font-bold text-slate-200 mt-1">{lotFor(p.factor).toFixed(2)}</p>
+                <p className="text-[9px] text-slate-600">{p.factor.toFixed(3)}/1k</p>
+              </button>
+            )
+          })}
+        </div>
+        <p className="text-[11px] text-slate-500 leading-relaxed">{t('rt.baselot.hint')}</p>
+      </div>
+    </div>
+  )
+}
+
+/* ─── SL-Rechner für offene Positionen ───────────────────── */
+function SLCalculatorCard({ positions, pvMap, balance, t }) {
+  const [riskPct, setRiskPct] = useState(() => {
+    const v = parseFloat(localStorage.getItem('tradestats_sl_risk_pct'))
+    return isNaN(v) || v <= 0 ? 1 : v
+  })
+  function setPct(v) {
+    const n = parseFloat(v)
+    if (!isNaN(n) && n > 0) { setRiskPct(n); localStorage.setItem('tradestats_sl_risk_pct', String(n)) }
+  }
+  const riskAmount = (balance || 0) * riskPct / 100
+  const open = positions || []
+  return (
+    <div className="card">
+      <div className="card-header">
+        <div className="flex items-center gap-2">
+          <ShieldAlert size={14} className="text-[#06b6d4]" />
+          <h3 className="text-sm font-semibold text-slate-200">{t('rt.sl.title')}</h3>
+        </div>
+        <div className="flex items-center gap-2 text-xs text-slate-500">
+          <span>{t('rt.sl.risk')}</span>
+          <div className="relative">
+            <input type="number" value={riskPct} onChange={e => setPct(e.target.value)} step="0.1" min="0.1" max="50"
+              className="input w-20 text-xs font-mono pr-5 py-1" />
+            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 text-xs">%</span>
+          </div>
+          <span className="font-mono text-slate-400">= ${riskAmount.toFixed(0)}</span>
+        </div>
+      </div>
+      <div className="p-4">
+        {open.length === 0 ? (
+          <div className="flex items-center gap-2 text-xs text-slate-500 bg-[#0d1117] border border-[#1f2937] rounded-lg p-3">
+            <Info size={14} /><span>{t('rt.sl.no_positions')}</span>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead><tr className="border-b border-[#1f2937]">
+                {[t('common.symbol'), t('common.type'), 'Lot', t('rt.sl.cur_price'), t('rt.sl.recommended'), t('rt.sl.distance')].map(h => (
+                  <th key={h} className="px-4 py-2.5 text-left text-[11px] text-slate-500 font-medium whitespace-nowrap">{h}</th>
+                ))}
+              </tr></thead>
+              <tbody>
+                {open.map(p => {
+                  const pv = pvMap[p.symbol]
+                  const isLong = p.type === 'BUY'
+                  // SL vom EINSTIEGSPREIS aus berechnen (Risiko misst sich am Entry, nicht am aktuellen Preis)
+                  const dist = (pv && p.volume > 0) ? riskAmount / (p.volume * pv) : null
+                  const sl = dist != null ? (isLong ? p.openPrice - dist : p.openPrice + dist) : null
+                  const digits = (p.openPrice && p.openPrice < 10) ? 5 : 2
+                  return (
+                    <tr key={p.id} className="border-b border-[#1f2937]/50 hover:bg-[#1a2233]">
+                      <td className="px-4 py-2.5 font-mono font-semibold text-slate-200">{p.symbol}</td>
+                      <td className="px-4 py-2.5"><span className={`px-2 py-0.5 rounded text-[10px] font-bold ${isLong ? 'bg-[#10b981]/10 text-[#10b981]' : 'bg-[#ef4444]/10 text-[#ef4444]'}`}>{p.type}</span></td>
+                      <td className="px-4 py-2.5 font-mono text-xs text-slate-300">{(p.volume ?? 0).toFixed(2)}</td>
+                      <td className="px-4 py-2.5 font-mono text-xs text-slate-400">{p.openPrice?.toFixed(digits)}</td>
+                      <td className="px-4 py-2.5 font-mono text-xs font-bold" style={{ color: sl == null ? '#6b7280' : '#06b6d4' }}>
+                        {sl == null ? t('rt.sl.no_pv') : sl.toFixed(digits)}
+                      </td>
+                      <td className="px-4 py-2.5 font-mono text-xs text-slate-500">{dist == null ? '—' : `${dist.toFixed(digits)}`}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <p className="text-[11px] text-slate-500 mt-3 leading-relaxed">{t('rt.sl.hint')}</p>
+      </div>
+    </div>
+  )
+}
+
 /* ─── Risk Tab ───────────────────────────────────────────── */
 export default function RiskTab() {
   const { effectiveTrades }               = useTrades()
   const { privacyMode, accountBalance }   = usePrivacyMode()
-  const { mfeMae, status }                = useLiveSync()
+  const { mfeMae, status, positions }     = useLiveSync()
   const { t }                             = useLanguage()
   const mfeArchive = mfeMae?.archive || {}
   const liveLeverage = status?.account?.leverage || 100
 
-  const [riskPercent, setRiskPct] = useState(() => {
-    const v = parseFloat(localStorage.getItem(RISK_KEY))
-    return isNaN(v) || v <= 0 ? 1 : v
-  })
-  const [editingRisk, setEditingRisk] = useState(false)
-  const [draftRisk,   setDraftRisk]   = useState(String(riskPercent))
-
-  function saveRisk(e) {
-    e.preventDefault()
-    const v = parseFloat(draftRisk)
-    if (!isNaN(v) && v > 0) {
-      setRiskPct(v)
-      localStorage.setItem(RISK_KEY, String(v))
-    }
-    setEditingRisk(false)
+  const [riskProfile, setRiskProfile] = useState(() => localStorage.getItem(PROFILE_KEY) || 'ausgewogen')
+  function selectProfile(id) {
+    setRiskProfile(id)
+    localStorage.setItem(PROFILE_KEY, id)
   }
+  // Balance bevorzugt aus Live-MT5 (stabiler als Equity), sonst Fallback.
+  const liveBalance = (status?.connected ? (status.account?.balance ?? accountBalance) : accountBalance) || 0
+  const profile = RISK_PROFILES.find(p => p.id === riskProfile) || RISK_PROFILES[2]
+  const standardLot = Math.max(0, (liveBalance / 1000) * profile.factor)
 
-  const riskAmount = accountBalance * riskPercent / 100
-
-  /* Per-Trade Daten */
+  /* Per-Trade Daten (ohne RR/SL-Modell) */
   const tradeRows = useMemo(() => {
     return [...effectiveTrades]
       .filter(t => t.closeTime)
       .sort((a, b) => new Date(b.closeTime) - new Date(a.closeTime))
-      .map(t => ({
-        ...t,
-        riskDollar:  riskAmount,
-        riskPct:     riskPercent,
-        rMultiple:   riskAmount > 0 ? t.profit / riskAmount : 0,
-        netPnl:      t.profit + (t.commission || 0) + (t.swap || 0),
-      }))
-  }, [effectiveTrades, riskAmount, riskPercent])
+      .map(t => ({ ...t, netPnl: t.profit + (t.commission || 0) + (t.swap || 0) }))
+  }, [effectiveTrades])
 
-  /* Summary Stats */
-  const avgRisk    = riskAmount
-  const maxRisk    = riskAmount  // fixed risk model — same for all trades
-  const avgRMult   = tradeRows.length
-    ? tradeRows.reduce((s, t) => s + t.rMultiple, 0) / tradeRows.length
-    : 0
+  /* Disziplin: % Verlierer + Overtrading (= Re-Entries, NICHT diskretionär) */
+  const { messages: sigMessages, available: sigAvailable } = useSignals()
+  const discipline = useMemo(() => {
+    const closed = tradeRows
+    const losers = closed.filter(t => t.netPnl < 0).length
+    const loserPct = closed.length ? (losers / closed.length) * 100 : 0
+    let overtrading = null, fromSignals = null
+    if (sigAvailable && sigMessages?.length) {
+      const mr = matchSignalsToTrades(sigMessages, effectiveTrades)
+      overtrading = mr.overtradedTrades.length   // Re-Entries auf genommene Signale
+      fromSignals = mr.tradeCount ? (mr.matches.length / mr.tradeCount) * 100 : 0
+    }
+    return { losers, loserPct, total: closed.length, overtrading, fromSignals }
+  }, [tradeRows, sigMessages, sigAvailable, effectiveTrades])
 
-  /* Verteilungs-Daten */
-  const distData = useMemo(() => buildRDist(tradeRows, riskAmount), [tradeRows, riskAmount])
+  /* $/Punkt pro Symbol (empirisch aus Historie) — für SL-Rechner */
+  const pvMap = useMemo(() => buildSymbolPointValues(effectiveTrades), [effectiveTrades])
+
+  /* Risiko-Kennzahlen aus der realisierten Equity-Kurve */
+  const riskMetrics = useMemo(() => {
+    const byClose = [...tradeRows].filter(t => t.closeTime)
+      .sort((a, b) => new Date(a.closeTime) - new Date(b.closeTime))
+    const losses = byClose.filter(t => t.netPnl < 0).map(t => t.netPnl)
+    const wins   = byClose.filter(t => t.netPnl > 0).map(t => t.netPnl)
+    const worst   = losses.length ? Math.min(...losses) : 0
+    const avgLoss = losses.length ? losses.reduce((s, n) => s + n, 0) / losses.length : 0
+    let eq = 0, peak = 0, maxDD = 0
+    for (const t of byClose) { eq += t.netPnl; if (eq > peak) peak = eq; const dd = peak - eq; if (dd > maxDD) maxDD = dd }
+    const grossWin  = wins.reduce((s, n) => s + n, 0)
+    const grossLoss = Math.abs(losses.reduce((s, n) => s + n, 0))
+    const profitFactor = grossLoss > 0 ? grossWin / grossLoss : (grossWin > 0 ? Infinity : 0)
+    const maxDDPct = liveBalance > 0 ? (maxDD / liveBalance) * 100 : 0
+    return { worst, avgLoss, maxDD, maxDDPct, profitFactor }
+  }, [tradeRows, liveBalance])
 
   return (
     <div className="p-6 space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold text-white">Risiko-Analyse</h1>
-          <p className="text-sm text-slate-500 mt-0.5">
-            Basierend auf {riskPercent}% Risiko pro Trade
-            {!privacyMode && ` = `}
-            {!privacyMode && <span className="text-slate-400 font-mono">${riskAmount.toFixed(0)}</span>}
-          </p>
-        </div>
+      <div>
+        <h1 className="text-xl font-bold text-white">{t('rt.title')}</h1>
+        <p className="text-sm text-slate-500 mt-0.5">{t('rt.subtitle_v2')}</p>
+      </div>
 
-        {/* Risiko konfigurieren */}
-        <div className="relative">
-          {editingRisk ? (
-            <form onSubmit={saveRisk} className="flex items-center gap-2">
-              <div className="relative">
-                <input
-                  autoFocus
-                  type="number"
-                  value={draftRisk}
-                  onChange={e => setDraftRisk(e.target.value)}
-                  onBlur={saveRisk}
-                  className="input w-24 text-xs font-mono pr-5"
-                  step="0.1" min="0.01" max="100"
-                />
-                <span className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 text-xs">%</span>
-              </div>
-              <button type="submit" className="btn-primary text-xs px-3 py-1.5">OK</button>
-            </form>
-          ) : (
-            <button
-              onClick={() => { setDraftRisk(String(riskPercent)); setEditingRisk(true) }}
-              className="flex items-center gap-2 px-3 py-2 rounded-lg border border-[#2d3748] bg-[#131c2e]
-                text-xs text-slate-400 hover:text-slate-200 hover:border-[#374151] transition-colors"
-            >
-              <Settings2 size={13} />
-              Risiko: {riskPercent}% / Trade
-            </button>
-          )}
+      {/* ── Basis-Lot-Rechner (Herzstück) ── */}
+      <BaseLotCalculatorCard
+        balance={liveBalance}
+        profileId={riskProfile}
+        onSelect={selectProfile}
+        standardLot={standardLot}
+        t={t}
+      />
+
+      {/* ── SL-Rechner für offene Positionen ── */}
+      <SLCalculatorCard positions={positions} pvMap={pvMap} balance={liveBalance} t={t} />
+
+      {/* ── Disziplin: Verlierer-Quote + Overtrading ── */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="rounded-xl border border-[#1f2937] bg-[#0d1117] p-4">
+          <p className="text-[10px] uppercase tracking-wide text-slate-500 font-medium mb-1">{t('rt.disc.losers')}</p>
+          <p className="text-2xl font-mono font-bold" style={{ color: discipline.loserPct > 50 ? '#ef4444' : discipline.loserPct > 35 ? '#f59e0b' : '#10b981' }}>
+            {discipline.loserPct.toFixed(0)}%
+          </p>
+          <p className="text-[11px] text-slate-500 mt-0.5">{discipline.losers} / {discipline.total} {t('common.trades')}</p>
+        </div>
+        <div className="rounded-xl border border-[#1f2937] bg-[#0d1117] p-4">
+          <p className="text-[10px] uppercase tracking-wide text-slate-500 font-medium mb-1">{t('rt.disc.overtrading')}</p>
+          <p className="text-2xl font-mono font-bold" style={{ color: discipline.overtrading == null ? '#6b7280' : discipline.overtrading > 0 ? '#f59e0b' : '#10b981' }}>
+            {discipline.overtrading == null ? '—' : discipline.overtrading}
+          </p>
+          <p className="text-[11px] text-slate-500 mt-0.5">{t('rt.disc.overtrading_sub')}</p>
+        </div>
+        <div className="rounded-xl border border-[#1f2937] bg-[#0d1117] p-4">
+          <p className="text-[10px] uppercase tracking-wide text-slate-500 font-medium mb-1">{t('rt.disc.from_signals')}</p>
+          <p className="text-2xl font-mono font-bold text-[#3b82f6]">
+            {discipline.fromSignals == null ? '—' : discipline.fromSignals.toFixed(0) + '%'}
+          </p>
+          <p className="text-[11px] text-slate-500 mt-0.5">{t('rt.disc.from_signals_sub')}</p>
         </div>
       </div>
 
-      {/* ── Konzept A: MAE-basiertes realisiertes Risiko ── */}
+      {/* ── Risiko-Kennzahlen (realisiert) ── */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="rounded-xl border border-[#ef4444]/30 bg-[#ef4444]/5 p-4">
+          <p className="text-[10px] uppercase tracking-wide text-[#ef4444] font-medium mb-1">{t('rt.metrics.maxdd')}</p>
+          <p className="text-xl font-mono font-bold text-[#ef4444]"><Pvt value={-riskMetrics.maxDD} sign={false} /></p>
+          <p className="text-[11px] text-slate-500 mt-0.5">{riskMetrics.maxDDPct.toFixed(1)}% {t('rt.metrics.of_balance')}</p>
+        </div>
+        <div className="rounded-xl border border-[#1f2937] bg-[#0d1117] p-4">
+          <p className="text-[10px] uppercase tracking-wide text-slate-500 font-medium mb-1">{t('rt.metrics.worst')}</p>
+          <p className="text-xl font-mono font-bold text-slate-200"><Pvt value={riskMetrics.worst} /></p>
+          <p className="text-[11px] text-slate-500 mt-0.5">{t('rt.metrics.worst_sub')}</p>
+        </div>
+        <div className="rounded-xl border border-[#1f2937] bg-[#0d1117] p-4">
+          <p className="text-[10px] uppercase tracking-wide text-slate-500 font-medium mb-1">{t('rt.metrics.avgloss')}</p>
+          <p className="text-xl font-mono font-bold text-slate-200"><Pvt value={riskMetrics.avgLoss} /></p>
+          <p className="text-[11px] text-slate-500 mt-0.5">{t('rt.metrics.avgloss_sub')}</p>
+        </div>
+        <div className="rounded-xl border border-[#1f2937] bg-[#0d1117] p-4">
+          <p className="text-[10px] uppercase tracking-wide text-slate-500 font-medium mb-1">{t('common.profit_factor')}</p>
+          <p className="text-xl font-mono font-bold" style={{ color: riskMetrics.profitFactor >= 1 ? '#10b981' : '#ef4444' }}>
+            {riskMetrics.profitFactor === Infinity ? '∞' : riskMetrics.profitFactor.toFixed(2)}
+          </p>
+          <p className="text-[11px] text-slate-500 mt-0.5">{t('rt.metrics.pf_sub')}</p>
+        </div>
+      </div>
+
+      {/* ── MAE-basiertes realisiertes Risiko (2. Sektion) ── */}
       <MaeRiskCard trades={tradeRows} mfeArchive={mfeArchive} accountBalance={accountBalance} />
 
       {/* ── Konzept B: Margin- & Exposure-Risiko ── */}
       <MarginExposureCard trades={tradeRows} leverage={liveLeverage} accountBalance={accountBalance} />
 
-      {/* ── Klassisches Risiko-Modell (theoretisch) ── */}
-      <div className="flex items-center gap-2 mt-2">
-        <div className="flex-1 h-px bg-[#1f2937]" />
-        <span className="text-[10px] uppercase tracking-wider text-slate-600 font-medium">{t('rt.classic_divider')}</span>
-        <div className="flex-1 h-px bg-[#1f2937]" />
-      </div>
-
-      {/* ── 3 Summary Cards ── */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <SCard
-          icon={ShieldAlert}
-          label="Ø Risiko pro Trade"
-          value={<Pvt value={avgRisk} sign={false} />}
-          sub={`${riskPercent}% des Kontos`}
-          color="text-[#f59e0b]"
-          iconColor="text-[#f59e0b]"
-        />
-        <SCard
-          icon={TrendingDown}
-          label="Max. Risiko pro Trade"
-          value={<Pvt value={maxRisk} sign={false} />}
-          sub={`Fixiertes Risiko-Modell`}
-          color="text-[#ef4444]"
-          iconColor="text-[#ef4444]"
-        />
-        <SCard
-          icon={BarChart2}
-          label="Ø R-Multiple"
-          value={avgRMult.toFixed(2) + 'R'}
-          sub={avgRMult >= 1 ? 'Profitabler Erwartungswert' : 'Erwartungswert negativ'}
-          color={avgRMult >= 1 ? 'text-[#10b981]' : avgRMult >= 0 ? 'text-[#f59e0b]' : 'text-[#ef4444]'}
-          iconColor="text-[#8b5cf6]"
-        />
-      </div>
-
-      {/* ── R-Multiple Verteilung ── */}
-      <div className="card">
-        <div className="card-header">
-          <h3 className="text-sm font-semibold text-slate-200">R-Multiple Verteilung</h3>
-          <span className="text-xs text-slate-500">{tradeRows.length} Trades</span>
-        </div>
-        <div className="p-4">
-          {tradeRows.length > 0 ? (
-            <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={distData} margin={{ top: 5, right: 10, bottom: 0, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" vertical={false} />
-                <XAxis dataKey="label" tick={{ fill: '#6b7280', fontSize: 11 }} tickLine={false} axisLine={false} />
-                <YAxis tick={{ fill: '#6b7280', fontSize: 10 }} tickLine={false} axisLine={false} width={30} />
-                <Tooltip
-                  content={({ active, payload, label }) => {
-                    if (!active || !payload?.length) return null
-                    return (
-                      <div className="bg-[#1a2233] border border-[#374151] rounded-lg px-3 py-2 shadow-xl text-xs">
-                        <p className="text-slate-400 mb-1">{label}</p>
-                        <p className="text-white font-mono font-semibold">{payload[0].value} Trades</p>
-                      </div>
-                    )
-                  }}
-                />
-                <ReferenceLine x="0…1R" stroke="#374151" />
-                <Bar dataKey="count" radius={[4, 4, 0, 0]} maxBarSize={60}>
-                  {distData.map((entry, i) => (
-                    <Cell key={i} fill={entry.color} fillOpacity={0.85} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="h-[200px] flex items-center justify-center text-slate-600 text-sm">
-              Keine Trades vorhanden
-            </div>
-          )}
-        </div>
-      </div>
-
       {/* ── Tilt-Detektor ── */}
-      <TiltDetectorSection trades={tradeRows} riskAmount={riskAmount} />
+      <TiltDetectorSection trades={tradeRows} />
 
       {/* ── Trades Tabelle ── */}
       <div className="card overflow-hidden">
@@ -696,7 +793,7 @@ export default function RiskTab() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-[#1f2937]">
-                {['Datum', 'Symbol', 'Seite', 'Risiko $', 'Risiko %', 'R-Multiple', 'P&L'].map(h => (
+                {['Datum', 'Symbol', 'Seite', 'Lot', 'P&L'].map(h => (
                   <th key={h} className="px-5 py-3 text-left text-xs text-slate-500 font-medium whitespace-nowrap">
                     {h}
                   </th>
@@ -706,14 +803,12 @@ export default function RiskTab() {
             <tbody>
               {tradeRows.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="text-center py-12 text-slate-600">
+                  <td colSpan={5} className="text-center py-12 text-slate-600">
                     Keine Trades vorhanden
                   </td>
                 </tr>
               ) : (
-                tradeRows.map(t => {
-                  const rColor_ = rColor(t.rMultiple)
-                  return (
+                tradeRows.map(t => (
                     <tr key={t.id} className="border-b border-[#1f2937]/50 hover:bg-[#1a2233] transition-colors">
                       <td className="px-5 py-3 text-slate-400 text-xs whitespace-nowrap">
                         {t.closeTime ? format(new Date(t.closeTime), 'dd.MM.yy HH:mm') : '—'}
@@ -729,18 +824,7 @@ export default function RiskTab() {
                         }`}>{t.type}</span>
                       </td>
                       <td className="px-5 py-3 font-mono text-slate-400 text-xs">
-                        <Pvt value={riskAmount} sign={false} />
-                      </td>
-                      <td className="px-5 py-3 font-mono text-slate-400 text-xs">
-                        {riskPercent.toFixed(2)}%
-                      </td>
-                      <td className="px-5 py-3">
-                        <span
-                          className="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono font-bold"
-                          style={{ backgroundColor: rColor_ + '20', color: rColor_ }}
-                        >
-                          {t.rMultiple >= 0 ? '+' : ''}{t.rMultiple.toFixed(2)}R
-                        </span>
+                        {(t.volume ?? 0).toFixed(2)}
                       </td>
                       <td className="px-5 py-3">
                         <span className={`font-mono font-semibold text-xs ${
@@ -750,8 +834,7 @@ export default function RiskTab() {
                         </span>
                       </td>
                     </tr>
-                  )
-                })
+                ))
               )}
             </tbody>
           </table>

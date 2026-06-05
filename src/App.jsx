@@ -8,7 +8,7 @@ import ImportPage from './components/ImportPage'
 import ExportPage from './components/ExportPage'
 import RiskTab from './components/RiskTab'
 import AnalysePage from './components/AnalysePage'
-import SetupLibraryPage from './components/SetupLibraryPage'
+import SignalsPage from './components/SignalsPage'
 import ProfileTab, { ReadonlyShareView } from './components/ProfileTab'
 import { ImportToast } from './components/LiveSyncPanel'
 import { SetupGate } from './components/SetupWizard'
@@ -55,8 +55,8 @@ export default function App() {
     'daily-journal': <DailyJournal />,
     calendar:        <CalendarView />,
     analyse:         <AnalysePage />,
-    setups:          <SetupLibraryPage />,
     risk:            <RiskTab />,
+    signals:         <SignalsPage />,
     profile:         <ProfileTab />,
     import:          <ImportPage />,
     export:          <ExportPage />,

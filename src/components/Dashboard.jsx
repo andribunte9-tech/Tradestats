@@ -552,10 +552,8 @@ export default function Dashboard() {
     return referenceBalance - sincePnl
   }, [effectiveTrades, periodCutoff, referenceBalance])
 
-  // ROI % und Ø R:R — relativ zur Balance am Periodenanfang
+  // ROI % — relativ zur Balance am Periodenanfang
   const roi    = balanceAtPeriodStart > 0 ? (stats.totalPnl / balanceAtPeriodStart) * 100 : 0
-  const avgRR  = stats.avgLoss > 0 ? stats.avgWin / stats.avgLoss : stats.avgWin > 0 ? Infinity : 0
-  const rrDisplay = avgRR === Infinity ? '∞' : avgRR.toFixed(2)
 
   // Y-Achsen-Formatter: $ oder ROI %
   const fmtTick = (v) => {
@@ -719,8 +717,8 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* ── 6 Stat Cards ── */}
-      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
+      {/* ── 5 Stat Cards ── */}
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
         <StatCard
           icon={TrendingUp}
           label={t('dash.total_pnl')}
@@ -763,14 +761,6 @@ export default function Dashboard() {
           value={stats.totalTrades}
           iconColor="text-[#8b5cf6]"
           sub={t('dash.winners', { count: stats.totalWins })}
-        />
-        <StatCard
-          icon={BarChart2}
-          label={t('dash.avg_rr')}
-          value={rrDisplay}
-          color={avgRR >= 1 ? 'text-[#10b981]' : avgRR > 0 ? 'text-[#f59e0b]' : 'text-[#ef4444]'}
-          iconColor="text-[#ec4899]"
-          sub={avgRR >= 2 ? t('dash.excellent') : avgRR >= 1 ? t('dash.good') : avgRR > 0 ? t('dash.improve') : '—'}
         />
       </div>
 

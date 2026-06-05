@@ -5,6 +5,164 @@
 
 const netPnl = (t) => (t.profit || 0) + (t.commission || 0) + (t.swap || 0)
 
+/* ═══ Signal-Matching: Telegram-Signale ↔ MT5-Trades ═══════════
+ * Verknüpft die geparsten Mentor-Signale (aus /signals) mit den echten
+ * MT5-Fills. Match-Kriterien: gleiches Symbol (normalisiert, Suffix-tolerant)
+ * + gleiche Richtung + Trade öffnet NACH dem Signal innerhalb eines Fensters.
+ * Entry-Preis-in-Range gibt einen Confidence-Bonus (aber kein Muss — manche
+ * Symbole sind broker-skaliert, z.B. US2000). Greedy: jedes Signal max. 1×.
+ * Liefert: matches, unmatchedTrades (= Diskretionär/Overtrading),
+ * unmatchedSignals (= ausgelassene Signale).
+ */
+function normSym(s) {
+  return String(s || '').split('.')[0].toUpperCase().replace(/[^A-Z0-9]/g, '')
+}
+function tradeDir(t) {
+  return /sell/i.test(t.type || '') ? 'SHORT' : 'LONG'
+}
+
+export function matchSignalsToTrades(messages, trades, opts = {}) {
+  const WINDOW_MS      = (opts.windowHours ?? 48) * 3600 * 1000
+  const TOL_BEFORE_MS  = 2 * 3600 * 1000   // Trade darf bis 2h VOR Signal-ts liegen (Clock-Skew)
+
+  // Signale flachklopfen
+  const signals = []
+  for (const m of messages || []) {
+    if (m.type !== 'SIGNAL') continue
+    for (const s of (m.signals || [])) {
+      if (!s.symbol || !s.direction || !m.ts) continue
+      signals.push({ ...s, ts: m.ts, msgId: m.msgId, _used: false })
+    }
+  }
+
+  const closed = (trades || []).filter(t => t.openTime && t.symbol)
+  const sorted = [...closed].sort((a, b) => new Date(a.openTime) - new Date(b.openTime))
+
+  const matches = []
+  const overtradedTrades = []
+  const discretionaryTrades = []
+
+  const inRangeOf = (s, t) => {
+    const lo = (s.entryLow != null && s.entryHigh != null) ? Math.min(s.entryLow, s.entryHigh) : null
+    const hi = (s.entryLow != null && s.entryHigh != null) ? Math.max(s.entryLow, s.entryHigh) : null
+    return lo != null && t.openPrice != null && t.openPrice >= lo * 0.999 && t.openPrice <= hi * 1.001
+  }
+
+  for (const t of sorted) {
+    const tSym = normSym(t.symbol), tDir = tradeDir(t), tOpen = new Date(t.openTime).getTime()
+    // Signale für Symbol+Richtung, die VOR (oder knapp nach) dem Trade liegen,
+    // im Fenster — jüngstes zuerst. Der Trader handelt das ZULETZT gesehene Signal.
+    const prior = signals
+      .filter(s => normSym(s.symbol) === tSym && s.direction === tDir)
+      .filter(s => { const dt = tOpen - new Date(s.ts).getTime(); return dt >= -TOL_BEFORE_MS && dt <= WINDOW_MS })
+      .sort((a, b) => new Date(b.ts) - new Date(a.ts))
+    if (!prior.length) { discretionaryTrades.push(t); continue }   // kein Signal → diskretionär
+    const intended = prior[0]
+    if (!intended._used) {
+      intended._used = true
+      const inRange = inRangeOf(intended, t)
+      matches.push({ trade: t, signal: intended, inRange, confidence: inRange ? 'high' : 'medium' })
+    } else {
+      overtradedTrades.push(t)   // jüngstes Signal schon genommen → Re-Entry = Overtrading
+    }
+  }
+
+  const unmatchedTrades = [...overtradedTrades, ...discretionaryTrades]
+  const unmatchedSignals = signals.filter(s => !s._used)
+  return {
+    matches,
+    unmatchedTrades,
+    overtradedTrades,
+    discretionaryTrades,
+    unmatchedSignals,
+    signalCount: signals.length,
+    tradeCount: closed.length,
+  }
+}
+
+function isForexSym(sym) {
+  const n = normSym(sym)
+  return /^[A-Z]{6}$/.test(n) && !/^(XAU|XAG)/.test(n)   // 6-Letter-Pair, aber keine Metalle
+}
+
+/* Ausführungs-Analyse: pro Match Entry-Slippage, Exit vs TP, und was der
+ * Trade "wie Robert" (Entry an Signal-Range-Mitte → Signal-TP) gebracht hätte.
+ * $/Punkt wird empirisch aus dem realen Trade rückgerechnet (profit/(vol×move)). */
+export function buildSignalExecution(matchResult, opts = {}) {
+  const { liveBalance = null, profileFactor = null } = opts
+
+  // Balance ZUM ERÖFFNUNGSZEITPUNKT rekonstruieren (für korrektes Soll-Lot):
+  // Startbalance = aktuelle Balance − Σ aller realisierten P&L; dann pro Trade
+  // die P&L aller VORHER geschlossenen Trades addieren.
+  const allTrades = [
+    ...(matchResult?.matches || []).map(m => m.trade),
+    ...(matchResult?.unmatchedTrades || []),
+  ]
+  const totalNet = allTrades.reduce((s, t) => s + netPnl(t), 0)
+  const startBalance = liveBalance != null ? liveBalance - totalNet : null
+  const balanceAtOpen = (t) => {
+    if (startBalance == null || !t.openTime) return liveBalance
+    const tOpen = new Date(t.openTime).getTime()
+    let bal = startBalance
+    for (const u of allTrades) {
+      if (u.closeTime && new Date(u.closeTime).getTime() < tOpen) bal += netPnl(u)
+    }
+    return bal
+  }
+
+  const rows = (matchResult?.matches || []).map(({ trade, signal, inRange, confidence }) => {
+    const isLong  = tradeDir(trade) === 'LONG'
+    // Erwartetes Lot = Standard-Lot (bei Eröffnung) × Multiplikator-Mitte.
+    // FX-Signale ohne expliziten Multiplikator → Faktor 1 (Standard-Lot selbst).
+    // Nicht-FX ohne Multiplikator → unbekannt.
+    let expectedLot = null, lotRatio = null
+    const mult = Array.isArray(signal.lotMultiplier) ? signal.lotMultiplier : null
+    const multMid = (mult && mult[0] != null && mult[1] != null)
+      ? (mult[0] + mult[1]) / 2
+      : (isForexSym(signal.symbol) ? 1 : null)
+    if (profileFactor != null && multMid != null) {
+      const stdLot = (balanceAtOpen(trade) / 1000) * profileFactor
+      expectedLot = stdLot * multMid
+      lotRatio = expectedLot > 0 ? (trade.volume || 0) / expectedLot : null
+    }
+    const entryRef = (signal.entryLow != null && signal.entryHigh != null)
+      ? (signal.entryLow + signal.entryHigh) / 2 : null
+    const yourMove = (trade.closePrice != null && trade.openPrice != null)
+      ? (isLong ? trade.closePrice - trade.openPrice : trade.openPrice - trade.closePrice) : null
+    const pv = (yourMove && trade.volume && (trade.profit || 0) !== 0)
+      ? (trade.profit) / (trade.volume * yourMove) : null
+    let theoMove = null, theoProfit = null
+    if (entryRef != null && signal.tp != null) {
+      theoMove = isLong ? signal.tp - entryRef : entryRef - signal.tp
+      if (pv != null && trade.volume) theoProfit = trade.volume * theoMove * pv
+    }
+    // Entry-Slippage in Preis (>0 = schlechter als Signal: teurer gekauft / billiger verkauft)
+    const entrySlip = (entryRef != null && trade.openPrice != null)
+      ? (isLong ? trade.openPrice - entryRef : entryRef - trade.openPrice) : null
+    return { trade, signal, inRange, confidence, entryRef, yourMove, pv, theoMove, theoProfit, entrySlip, expectedLot, lotRatio, realized: netPnl(trade) }
+  })
+
+  const withTheo = rows.filter(r => r.theoProfit != null)
+  const realizedSubset = withTheo.reduce((s, r) => s + r.realized, 0)
+  const theoSum = withTheo.reduce((s, r) => s + r.theoProfit, 0)
+
+  return {
+    rows,
+    realizedSum:   rows.reduce((s, r) => s + r.realized, 0),
+    theoSum,
+    realizedSubset,
+    diff:          theoSum - realizedSubset,   // >0 = "wie Robert" hätte mehr gebracht
+    comparable:    withTheo.length,
+    inRangeCount:  rows.filter(r => r.inRange).length,
+    matchCount:    rows.length,
+    overtradingCount:    matchResult?.overtradedTrades?.length || 0,
+    discretionaryCount:  matchResult?.discretionaryTrades?.length || 0,
+    skippedSignalsCount: matchResult?.unmatchedSignals?.length || 0,
+    signalCount:   matchResult?.signalCount || 0,
+    tradeCount:    matchResult?.tradeCount || 0,
+  }
+}
+
 /* ─── 13. MFE/MAE — Capture-Rate ──────────────────────────── */
 /**
  * Merge backend MFE/MAE archive into trade objects + compute capture rate.
@@ -713,16 +871,32 @@ export function buildEquityForecast({ trades, basePeriodDays, forecastDays, star
     : 0
   const stdRate = Math.sqrt(rateVariance)
 
-  // Realistic-Cap für Compound-Modus: maximal 10% Wachstum pro Trading-Woche (5 Tage).
-  // Daraus folgt ein Tages-Cap von (1.10)^(1/5) - 1 ≈ 1.924% — ambitioniert, aber
-  // über Jahre durchhaltbar gedacht. Verhindert, dass kleine Konten in der Prognose
-  // in absurde Millionen-Bereiche springen, sobald die Stichprobe einen starken
-  // Lauf erwischt hat.
-  const REALISTIC_WEEKLY_CAP = 0.10   // 10% pro Trading-Woche
-  const REALISTIC_DAILY_CAP  = Math.pow(1 + REALISTIC_WEEKLY_CAP, 1 / 5) - 1
+  // Prognose auf Basis der ECHTEN Wochen-Performance (kein künstlicher Cap):
+  // realisierte Compound-Wochenrate aus der Equity-Kurve über das Basisfenster.
+  // = (Equity_Ende / Equity_Anfang)^(1/Wochen) - 1. Robuster als das Tages-Mittel
+  // (ein einzelner Glückstag verzerrt nicht), und es ist dein tatsächliches
+  // Wachstum statt einer fixen 10%-Annahme.
   const rawMeanRate = meanRate
-  const cappedMeanRate = Math.min(Math.max(meanRate, -REALISTIC_DAILY_CAP), REALISTIC_DAILY_CAP)
-  const wasCapped = compound && Math.abs(meanRate) > REALISTIC_DAILY_CAP
+  // Gruppiere die Basis-Tage nach Kalenderwoche (Montag-Anker) und berechne pro
+  // Woche den Return relativ zum Equity-Stand AM WOCHENANFANG. Der Mittelwert
+  // dieser Wochen-Returns ist robust gegen die Startbasis (anders als ein CAGR
+  // von einem winzigen Anfangskonto, das absurd hohe %-Raten erzeugen würde).
+  const weekBuckets = {}
+  for (const day of baseDays) {
+    const dt  = new Date(day + 'T00:00:00Z')
+    const dow = (dt.getUTCDay() + 6) % 7          // Montag = 0
+    const monday = new Date(dt.getTime() - dow * 86400000).toISOString().slice(0, 10)
+    if (!weekBuckets[monday]) weekBuckets[monday] = { pnl: 0, startEquity: equityBefore[day] }
+    weekBuckets[monday].pnl += dailyPnl[day] || 0
+  }
+  const weekReturns = Object.values(weekBuckets)
+    .map(w => w.startEquity > 0 ? w.pnl / w.startEquity : 0)
+  const realizedWeeklyRate = weekReturns.length
+    ? weekReturns.reduce((s, n) => s + n, 0) / weekReturns.length
+    : 0
+  // In Tagesrate (5 Trading-Tage/Woche) für die Tages-Compound-Projektion umrechnen.
+  const projDailyRate = Math.pow(1 + Math.max(realizedWeeklyRate, -0.99), 1 / 5) - 1
+  const wasCapped = false   // kein Cap mehr — echte Performance
 
   // Trading-day frequency (active days / calendar days in base window)
   let calendarDaysInBase = 0
@@ -735,7 +909,7 @@ export function buildEquityForecast({ trades, basePeriodDays, forecastDays, star
 
   // Per-calendar-day rates (account for non-trading days)
   const expectedDailyPnl  = meanDaily * tradingDayRate
-  const expectedDailyRate = cappedMeanRate * tradingDayRate
+  const expectedDailyRate = projDailyRate * tradingDayRate
   const stdPerCalDay      = stdDaily  * tradingDayRate
   const stdRatePerCalDay  = stdRate   * tradingDayRate
 
@@ -760,9 +934,9 @@ export function buildEquityForecast({ trades, basePeriodDays, forecastDays, star
     if (isWeekday) {
       tradingDaysElapsed++
       if (compound) {
-        // Use per-trading-day rate (not calendar-day) since we only step on weekdays
-        // cappedMeanRate verhindert absurde Hochrechnungen (siehe REALISTIC_DAILY_CAP oben)
-        projEquity *= (1 + cappedMeanRate)
+        // Use per-trading-day rate (not calendar-day) since we only step on weekdays.
+        // projDailyRate stammt aus der echten realisierten Wochenrate.
+        projEquity *= (1 + projDailyRate)
       } else {
         projEquity += meanDaily
         cumVarianceSum += stdDaily ** 2
@@ -823,11 +997,12 @@ export function buildEquityForecast({ trades, basePeriodDays, forecastDays, star
     combined,
     meanDaily,
     stdDaily,
-    meanRate: cappedMeanRate,    // gekappte Rate, die tatsächlich verwendet wurde
-    rawMeanRate,                 // historische Rate ohne Cap (zum Vergleich)
-    wasCapped,                   // true wenn der Cap gegriffen hat
-    realisticCap: REALISTIC_DAILY_CAP,
-    realisticWeeklyCap: REALISTIC_WEEKLY_CAP,
+    meanRate: projDailyRate,     // verwendete Tagesrate (aus echter Wochenrate abgeleitet)
+    rawMeanRate,                 // einfaches Tages-Mittel (zum Vergleich)
+    weeklyRate: realizedWeeklyRate,  // realisierte Compound-Wochenrate aus der Historie
+    wasCapped,                   // immer false — kein Cap mehr
+    realisticCap: null,
+    realisticWeeklyCap: null,
     stdRate,
     expectedDailyPnl,
     expectedDailyRate,           // per-calendar-day return rate used in compound mode
